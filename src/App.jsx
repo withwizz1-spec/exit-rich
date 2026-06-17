@@ -1,0 +1,2697 @@
+import { useState, useEffect, useRef } from "react";
+import confetti from "canvas-confetti";
+
+// ─── 상수 ────────────────────────────────────────────────────────────────────
+const MIN_WAGE_MONTHLY = 2096270; // 2025년 최저 월급
+const MAX_YEARS = 50;            // 최대 인정 근속 연수
+
+// ─── 종목별 기대수익률 ─────────────────────────────────────────────────────────
+const EXPECTED_RETURNS = {
+  'TIGER 미국S&P500': 0.07,
+  'TIGER 나스닥100': 0.09,
+  'TIGER 미국S&P500TR': 0.07,
+  'KODEX 미국S&P500TR': 0.07,
+  'KODEX 미국빅테크7': 0.10,
+  'TIGER 인도니프티50': 0.09,
+  'TIGER 단기통안채': 0.03,
+  'KODEX 단기채권': 0.03,
+  'TIGER 글로벌리츠': 0.06,
+  'KODEX 고배당': 0.06,
+  'KODEX 회사채AA+': 0.04,
+  '국고채 3년': 0.03,
+  'TIGER 국채3년': 0.03,
+  '파킹통장': 0.03,
+  'CMA': 0.03,
+  '정기예금': 0.035,
+};
+
+// ─── 성향별 슬라이더 초기값 ──────────────────────────────────────────────────
+const PROFILE_RATIOS = {
+  "보수형": { pension: 20, isa: 10, other: 70 },
+  "안정형": { pension: 40, isa: 20, other: 40 },
+  "성장형": { pension: 55, isa: 30, other: 15 },
+  "공격형": { pension: 65, isa: 35, other: 0 },
+};
+
+// ─── ETF 상세 정보 ────────────────────────────────────────────────────────────
+const ETF_DETAILS = {
+  'TIGER 미국S&P500': {
+    manager: "미래에셋자산운용",
+    fee: "연 0.07%",
+    holdings: "애플, 마이크로소프트, 엔비디아 등 미국 대형주 500개",
+    returns: { month1: "+1.8%", month6: "+9.2%", year1: "+24.3%" },
+    volatility: "2020년 코로나 -34% → 6개월 만에 회복 / 2022년 금리인상기 -19% → 1년 만에 회복",
+    mzReason: "검증된 20년 장기 투자의 정석. 미국 경제 전체에 투자하는 효과로 개별 종목 리스크 없이 꾸준한 복리 성장 가능",
+  },
+  'TIGER 나스닥100': {
+    manager: "미래에셋자산운용",
+    fee: "연 0.07%",
+    holdings: "애플, 엔비디아, 마이크로소프트, 구글, 메타 등 미국 기술주 100개",
+    returns: { month1: "+2.9%", month6: "+13.5%", year1: "+31.7%" },
+    volatility: "2022년 금리인상기 -33% → 2023년 완전 회복 / 단기 변동성 크지만 장기 우상향",
+    mzReason: "AI·빅테크 성장의 직접 수혜. 20~30년 보유 시 S&P500보다 높은 수익 기대 가능. 변동성은 크지만 MZ의 긴 투자 기간이 리스크를 상쇄",
+  },
+  'TIGER 미국S&P500TR': {
+    manager: "미래에셋자산운용",
+    fee: "연 0.07%",
+    holdings: "S&P500과 동일하나 배당금 자동 재투자(TR)",
+    returns: { month1: "+1.8%", month6: "+9.4%", year1: "+24.7%" },
+    volatility: "S&P500과 동일한 등락 패턴 / TR 구조로 배당 재투자 자동화",
+    mzReason: "ISA 계좌에서 배당이 비과세로 자동 재투자돼 일반형보다 복리 효과가 더 커요. ISA에 담을 땐 TR형이 무조건 유리",
+  },
+  'KODEX 미국빅테크7': {
+    manager: "삼성자산운용",
+    fee: "연 0.15%",
+    holdings: "애플, 마이크로소프트, 엔비디아, 구글, 메타, 아마존, 테슬라 7개 집중",
+    returns: { month1: "+3.7%", month6: "+16.1%", year1: "+38.2%" },
+    volatility: "2022년 -40% 이상 / 2023~2024년 200% 이상 반등",
+    mzReason: "AI 시대를 이끄는 7개 기업에 집중 투자. 변동성은 크지만 이 기업들이 망하면 미국 경제 자체가 흔들리는 수준. 공격적 수익 원할 때 소액 위성 투자로 적합",
+  },
+  'TIGER 인도니프티50': {
+    manager: "미래에셋자산운용",
+    fee: "연 0.24%",
+    holdings: "인도 대표 기업 50개 (릴라이언스, HDFC, 인포시스 등)",
+    returns: { month1: "-0.8%", month6: "+4.8%", year1: "+10.5%" },
+    volatility: "신흥국 특성상 연 ±20~30% 변동 가능",
+    mzReason: "지금 인도는 1990년대 중국과 비슷한 상황. 14억 인구 평균 나이 28세, GDP 성장률 연 6~7%. 20~30년 장기 보유 시 복리 효과 극대화. 탈중국 제조업 이전 수혜로 성장 가속 중",
+  },
+  'TIGER 단기통안채': {
+    manager: "미래에셋자산운용",
+    fee: "연 0.05%",
+    holdings: "한국은행 발행 초단기 채권",
+    returns: { month1: "+0.3%", month6: "+1.8%", year1: "+3.5%" },
+    volatility: "거의 없음 (원금 손실 가능성 매우 낮음)",
+    mzReason: "안정적 성향에서 ISA 비과세 혜택을 받으면서 예금보다 높은 수익. 주식 시장 하락 시 완충 역할",
+  },
+};
+
+// ─── ETF 종목 코드 (야후 파이낸스 .KS) ──────────────────────────────────────
+const TICKER_CODES = {
+  'TIGER 미국S&P500':   '360750',
+  'TIGER 나스닥100':    '133690',
+  'TIGER 미국S&P500TR': '448290',
+  'KODEX 미국빅테크7':  '486290',
+  'TIGER 인도니프티50': '437080',
+  'TIGER 단기통안채':   '157450',
+};
+
+async function fetchPrice(code) {
+  try {
+    const res = await fetch(`https://exit-rich-price.withwizz1.workers.dev/?code=${code}`);
+    const json = await res.json();
+    return json?.price ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── 카운트업 훅 ─────────────────────────────────────────────────────────────
+function useCountUp(end, duration = 800) {
+  const [value, setValue] = useState(end);
+  const endRef = useRef(end);
+  useEffect(() => {
+    const from = 0;
+    endRef.current = end;
+    setValue(from);
+    const startTime = performance.now();
+    let raf;
+    const tick = (now) => {
+      const progress = Math.min((now - startTime) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setValue(Math.round(from + (endRef.current - from) * eased));
+      if (progress < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [end, duration]);
+  return value;
+}
+
+// ─── 퇴직금 계산 핵심 로직 ───────────────────────────────────────────────────
+function calcRetirementPay({ startDate, endDate, monthlyPayList, annualLeaveBonus, includeLeave }) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const workDays = Math.floor((end - start) / (1000 * 60 * 60 * 24));
+
+  if (workDays < 365) return { pay: 0, workDays, valid: false };
+
+  // 퇴직일 직전 3개월의 실제 달력 일수 (2월 포함 시 89~90일 등 정확히 반영)
+  const periodStart = new Date(end.getFullYear(), end.getMonth() - 3, end.getDate());
+  const actual3MonthDays = Math.round((end - periodStart) / (1000 * 60 * 60 * 24));
+
+  const total3Months = monthlyPayList.reduce((sum, m) => sum + m.base + m.allowance, 0);
+  // 연차수당 1년치 × 3/12 만 3개월 평균임금에 반영
+  const leaveAmount = includeLeave ? Math.round(annualLeaveBonus * 3 / 12) : 0;
+  const dailyAvg = (total3Months + leaveAmount) / actual3MonthDays;
+  const pay = Math.floor(dailyAvg * 30 * (workDays / 365));
+
+  return { pay, workDays, dailyAvg: Math.floor(dailyAvg), actual3MonthDays, valid: true };
+}
+
+// ─── 입력값 유효성 검사 ───────────────────────────────────────────────────────
+function validate({ startDate, endDate, months, includeLeave, leaveBonusStr }) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (!startDate || !endDate) return "입사일과 퇴직일을 입력해주세요.";
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return "날짜 형식이 올바르지 않아요.";
+  if (start >= end) return "퇴직일이 입사일보다 늦어야 해요.";
+  if (start > today) return "입사일이 미래일 수 없어요.";
+  if (end > today) return "퇴직일이 오늘보다 미래일 수 없어요.";
+
+  const workYears = (end - start) / (1000 * 60 * 60 * 24 * 365);
+  if (workYears > MAX_YEARS) return `근속 ${MAX_YEARS}년 이상은 입력할 수 없어요. 날짜를 다시 확인해주세요.`;
+
+  if (months.some((m) => m.base === 0)) return "3개월 기본급을 모두 입력해주세요.";
+
+  // 최저임금 이하 경고 (에러는 아님 — 별도 warning으로 처리)
+  if (includeLeave && fromComma(leaveBonusStr) === 0) return "연차수당 금액을 입력해주세요.";
+
+  return null; // 에러 없음
+}
+
+// 최저임금 이하 여부 체크 (에러 대신 경고)
+function checkMinWage(months) {
+  return months.some((m) => m.base > 0 && m.base < MIN_WAGE_MONTHLY);
+}
+
+// ─── 유틸 ────────────────────────────────────────────────────────────────────
+function formatWorkPeriod(days) {
+  const years = Math.floor(days / 365);
+  const months = Math.floor((days % 365) / 30);
+  const remainder = days % 365 % 30;
+  return `${years}년 ${months}개월 ${remainder}일`;
+}
+
+function formatKRW(num) {
+  return num.toLocaleString("ko-KR");
+}
+
+function toComma(val) {
+  const num = val.replace(/[^0-9]/g, "");
+  return num ? Number(num).toLocaleString("ko-KR") : "";
+}
+
+function fromComma(val) {
+  return Number(String(val).replace(/,/g, "")) || 0;
+}
+
+// 계좌 금액을 ETF 비중에 따라 배분 — 첫 종목 만원 절삭, 마지막 종목 나머지 전액
+function calcAssetAmounts(accountAmount, assets) {
+  if (!assets || assets.length === 0) return [];
+  if (assets.length === 1) return [accountAmount];
+  const amounts = [];
+  let remaining = accountAmount;
+  for (let i = 0; i < assets.length - 1; i++) {
+    const w = assets[i].weight ?? (100 / assets.length);
+    const amt = Math.floor(accountAmount * w / 100 / 10000) * 10000;
+    amounts.push(amt);
+    remaining -= amt;
+  }
+  amounts.push(Math.max(0, remaining));
+  return amounts;
+}
+
+// ─── 포트폴리오 가중평균 수익률 계산 ──────────────────────────────────────────
+function calcPortfolioRate(strategy, ratios) {
+  const accountRate = (assets) => {
+    if (!assets || assets.length === 0) return 0.05;
+    const defaultW = 100 / assets.length;
+    const totalWeight = assets.reduce((s, a) => s + (a.weight ?? defaultW), 0);
+    return assets.reduce((sum, a) => {
+      const w = (a.weight ?? defaultW) / totalWeight;
+      return sum + (EXPECTED_RETURNS[a.name] ?? 0.05) * w;
+    }, 0);
+  };
+  const total = ratios.pension + ratios.isa + ratios.other;
+  if (total === 0) return strategy.midRate / 100;
+  return (
+    accountRate(strategy.assets.pension) * ratios.pension +
+    accountRate(strategy.assets.isa) * ratios.isa +
+    accountRate(strategy.assets.other) * ratios.other
+  ) / total;
+}
+
+// ─── InputField ──────────────────────────────────────────────────────────────
+function InputField({ label, type = "text", value, onChange, placeholder, suffix, max }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <label style={{ fontSize: 11, fontWeight: 500, color: "#6A5A4A" }}>{label}</label>
+      <div style={{ position: "relative" }}>
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          max={max}
+          style={{
+            width: "100%",
+            border: "0.5px solid #332820",
+            borderRadius: 10,
+            padding: suffix ? "10px 36px 10px 14px" : "10px 14px",
+            fontSize: 15,
+            color: "#ffffff",
+            background: "#2A2018",
+            outline: "none",
+            fontFamily: "inherit",
+            boxSizing: "border-box",
+          }}
+          onFocus={(e) => (e.target.style.borderColor = "#03fcf0")}
+          onBlur={(e) => (e.target.style.borderColor = "#332820")}
+        />
+        {suffix && (
+          <span style={{
+            position: "absolute", right: 12, top: "50%",
+            transform: "translateY(-50%)",
+            fontSize: 12, color: "#9A8A7A",
+          }}>
+            {suffix}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── MonthPayCard ─────────────────────────────────────────────────────────────
+function MonthPayCard({ label, data, onChange, showMinWageWarning }) {
+  const total = data.base + data.allowance;
+  return (
+    <div style={{
+      background: "#2A2018", borderRadius: 12,
+      border: `0.5px solid ${showMinWageWarning ? "#FF4D9D" : "#332820"}`,
+      padding: "14px", transition: "border-color 0.2s",
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 500, color: "#FF4D9D", marginBottom: 10 }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <InputField
+          label="기본급"
+          value={data.baseStr}
+          onChange={(v) => onChange({ ...data, baseStr: toComma(v), base: fromComma(v) })}
+          placeholder="3,000,000"
+          suffix="원"
+        />
+        <InputField
+          label="고정수당 (식대, 교통비 등)"
+          value={data.allowanceStr}
+          onChange={(v) => onChange({ ...data, allowanceStr: toComma(v), allowance: fromComma(v) })}
+          placeholder="300,000"
+          suffix="원"
+        />
+      </div>
+      {total > 0 && (
+        <div style={{
+          marginTop: 10, paddingTop: 10,
+          borderTop: "0.5px solid #332820",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span style={{ fontSize: 12, color: "#9A8A7A" }}>합계</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "#FF4D9D" }}>
+            {formatKRW(total)}원
+          </span>
+        </div>
+      )}
+      {/* 최저임금 이하 경고 */}
+      {showMinWageWarning && (
+        <div style={{
+          marginTop: 8, fontSize: 11, color: "#FF4D9D",
+          background: "#1A0810", borderRadius: 8, padding: "6px 10px",
+        }}>
+          ⚠️ 2025년 최저 월급(2,096,270원)보다 낮아요. 다시 확인해주세요.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LeaveToggle ──────────────────────────────────────────────────────────────
+function LeaveToggle({ includeLeave, onToggle, bonusStr, onBonusChange }) {
+  return (
+    <div style={{
+      background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16,
+      border: "0.5px solid #332820", padding: "20px", marginBottom: 12,
+    }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        marginBottom: includeLeave ? 14 : 0,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: "#ffffff" }}>연차수당 포함</div>
+          <div style={{ fontSize: 12, color: "#9A8A7A", marginTop: 2 }}>
+            전년도 미사용 연차를 수당으로 받은 경우
+          </div>
+        </div>
+        <div
+          onClick={onToggle}
+          style={{
+            width: 44, height: 24, borderRadius: 99,
+            background: includeLeave ? "#FF4D9D" : "#332820",
+            position: "relative", cursor: "pointer",
+            transition: "background 0.2s", flexShrink: 0,
+          }}
+        >
+          <div style={{
+            position: "absolute", top: 3,
+            left: includeLeave ? 22 : 2,
+            width: 18, height: 18, borderRadius: "50%",
+            background: "#ffffff", transition: "left 0.2s",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.5)",
+          }} />
+        </div>
+      </div>
+      {includeLeave && (
+        <div style={{ animation: "fadeIn 0.2s ease" }}>
+          <InputField
+            label="전년도에 받은 연차수당 (1년치 총액)"
+            value={bonusStr}
+            onChange={onBonusChange}
+            placeholder="예: 760,000"
+            suffix="원"
+          />
+          <div style={{ marginTop: 8, fontSize: 11, color: "#C2185B", background: "#1A0810", borderRadius: 8, padding: "6px 10px", lineHeight: 1.6 }}>
+            💡 전년도에 받은 연차수당 1년치를 입력하면, 이 중 3개월분(×3/12)만 평균임금에 자동 반영돼요
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
+export default function RetirementCalculator() {
+  // 날짜 max값: 오늘 날짜 (미래 날짜 입력 방지)
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  const [startDate, setStartDate] = useState("2024-01-08");
+  const [endDate, setEndDate] = useState("2026-03-31");
+  const [months, setMonths] = useState([
+    { baseStr: "1,970,000", allowanceStr: "967,500", base: 1970000, allowance: 967500 },
+    { baseStr: "1,970,000", allowanceStr: "967,500", base: 1970000, allowance: 967500 },
+    { baseStr: "1,970,000", allowanceStr: "967,500", base: 1970000, allowance: 967500 },
+  ]);
+  const [includeLeave, setIncludeLeave] = useState(true);
+  const [leaveBonusStr, setLeaveBonusStr] = useState("189,862");
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [investmentBase, setInvestmentBase] = useState(null); // 실제 투자금 (원)
+  const [showEmergencyFlow, setShowEmergencyFlow] = useState(false);
+  const [showImmediateSummary, setShowImmediateSummary] = useState(false);
+  const [q1Answer, setQ1Answer] = useState(null);
+  const [q2Answer, setQ2Answer] = useState(null);
+  const [q3Answer, setQ3Answer] = useState(null);
+  const [calculatedEmergency, setCalculatedEmergency] = useState(null);
+  const [forecastRate, setForecastRate] = useState(6);
+  const [forecastYears, setForecastYears] = useState(20);
+  const [selectedScenario, setSelectedScenario] = useState("basic");
+  const [purchaseMode, setPurchaseMode] = useState("lump");
+  const [splitMonths, setSplitMonths] = useState(3);
+  const [autoInvestOpen, setAutoInvestOpen] = useState(false);
+  const [portfolioRatios, setPortfolioRatios] = useState({ pension: 60, isa: 30, other: 10 });
+  const [expandedEtf, setExpandedEtf] = useState(null);
+  const [showBuyGuide, setShowBuyGuide] = useState(null);
+  const [directInputMode, setDirectInputMode] = useState(false);
+  const [directInputStr, setDirectInputStr] = useState("6,750,000");
+  const [accountISA, setAccountISA] = useState(null);
+  const [accountPension, setAccountPension] = useState(null);
+  const [allocationResult, setAllocationResult] = useState(null);
+  const [trackingValues, setTrackingValues] = useState(() => {
+    try {
+      const saved = localStorage.getItem("exit-rich-tracking");
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
+
+  const [screen, setScreen] = useState("calculator");
+  const [etfPrices, setEtfPrices] = useState({});
+
+  const SCREEN_ORDER = ["calculator", "account", "quiz", "map", "forecast", "tracking"];
+  const _directionRef = useRef(0);
+  const navigate = (next) => {
+    const cur = SCREEN_ORDER.indexOf(screen);
+    const nxt = SCREEN_ORDER.indexOf(next);
+    _directionRef.current = nxt >= cur ? 1 : -1;
+    setScreen(next);
+  };
+
+
+  // STEP 4 카운트업용 — hook은 항상 최상단에서 호출해야 함 (Rules of Hooks)
+  const _forecastSelectedAmount = investmentBase ?? (result?.pay ?? 0);
+  const _forecastStrategy = getStrategyInfo(forecastRate);
+  const _forecastPortfolioRate = calcPortfolioRate(_forecastStrategy, portfolioRatios);
+  const _forecastFinalAmount = purchaseMode === "lump"
+    ? Math.round(_forecastSelectedAmount * Math.pow(1 + _forecastPortfolioRate, forecastYears))
+    : (() => {
+        const inst = _forecastSelectedAmount / splitMonths;
+        let total = 0;
+        for (let n = 1; n <= splitMonths; n++) {
+          total += inst * Math.pow(1 + _forecastPortfolioRate, Math.max(0, forecastYears - n / 12));
+        }
+        return Math.round(total);
+      })();
+  const animatedFinalMan = useCountUp(Math.floor(_forecastFinalAmount / 10000));
+  const quizQuestions = [
+    {
+      question: "갑자기 생긴 1주일 휴가, 어떻게 써?",
+      options: [
+        { label: "🗺️ 미리 짜둔 일정대로 완벽하게", score: 1 },
+        { label: "🏨 숙소만 잡고 나머지는 현지에서", score: 2 },
+        { label: "🎒 일단 비행기 티켓만 끊고 떠남", score: 3 },
+        { label: "⚡ 당일 예약으로 무계획 즉흥 여행", score: 4 },
+      ],
+    },
+    {
+      question: "카페에서 한 번도 안 먹어본 신메뉴 발견. 어떻게 해?",
+      options: [
+        { label: "☕ 늘 먹던 아메리카노 주문", score: 1 },
+        { label: "🧐 리뷰 찾아보고 결정", score: 2 },
+        { label: "🤔 반반 반응이면 일단 주문", score: 3 },
+        { label: "🎲 고민 없이 바로 주문", score: 4 },
+      ],
+    },
+    {
+      question: "친구가 \"이거 진짜 오를 것 같아\" 하면?",
+      options: [
+        { label: "🙅 관심 없어, 난 예적금파", score: 1 },
+        { label: "🔍 직접 공부하고 소액만", score: 2 },
+        { label: "💸 좀 더 알아보고 어느 정도 투자", score: 3 },
+        { label: "🚀 친구 믿고 몰빵", score: 4 },
+      ],
+    },
+    {
+      question: "투자한 종목이 -20% 찍혔어. 어떻게 해?",
+      options: [
+        { label: "😭 바로 손절, 더 잃기 싫어", score: 1 },
+        { label: "😟 일단 지켜보면서 고민", score: 2 },
+        { label: "😤 버틴다, 언젠간 오르겠지", score: 3 },
+        { label: "😏 이때다 싶어서 추가 매수", score: 4 },
+      ],
+    },
+    {
+      question: "월급 들어오면 제일 먼저 하는 것?",
+      options: [
+        { label: "🏦 저축 먼저, 나머지로 생활", score: 1 },
+        { label: "📊 저축 + 소액 투자 후 나머지 소비", score: 2 },
+        { label: "🛍️ 쓰고 싶은 거 쓰고 남은 거 저축", score: 3 },
+        { label: "🎉 일단 쓰고 봄, 돈은 또 벌면 되지", score: 4 },
+      ],
+    },
+  ];
+  // TODO: 배포 시 기본값 제거 (null로 초기화)
+  const [quizAnswers, setQuizAnswers] = useState(Array(quizQuestions.length).fill(2));
+  const [quizError, setQuizError] = useState("");
+  const [quizResult, setQuizResult] = useState(null);
+
+  useEffect(() => {
+    if (screen !== "tracking") return;
+    Object.entries(TICKER_CODES).forEach(([name, code]) => {
+      setEtfPrices(prev => ({ ...prev, [name]: { status: "loading", price: null } }));
+      fetchPrice(code).then(price => {
+        setEtfPrices(prev => ({ ...prev, [name]: { status: price ? "ok" : "error", price } }));
+      });
+    });
+  }, [screen]);
+
+  const getMonthLabels = () => {
+    if (!endDate) return ["1개월 전", "2개월 전", "3개월 전"];
+    const base = new Date(endDate);
+    return [0, 1, 2].map((i) => {
+      const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
+      return `${d.getMonth() + 1}월분`;
+    });
+  };
+
+  const monthLabels = getMonthLabels();
+  const minWageWarnings = months.map((m) => checkMinWage([m]));
+
+  const handleCalc = () => {
+    setError("");
+    const err = validate({ startDate, endDate, months, includeLeave, leaveBonusStr });
+    if (err) { setError(err); return; }
+
+    const res = calcRetirementPay({
+      startDate, endDate,
+      monthlyPayList: months,
+      annualLeaveBonus: fromComma(leaveBonusStr),
+      includeLeave,
+    });
+
+    if (!res.valid) { setError("퇴직금은 1년 이상 근무 시 지급됩니다."); return; }
+    setResult(res);
+    fireMoneyConfetti();
+  };
+
+  function fireMoneyConfetti() {
+    const scalar = 2.5;
+    const shapes = ["💰", "💵", "🪙", "💸"].map((emoji) =>
+      confetti.shapeFromText({ text: emoji, scalar })
+    );
+
+    const base = { shapes, scalar, ticks: 150, gravity: 0.9, decay: 0.94 };
+
+    // 왼쪽 위 → 오른쪽 아래로 퍼짐
+    confetti({ ...base, particleCount: 30, angle: 300, spread: 60, origin: { x: 0.1, y: 0 }, startVelocity: 35 });
+    // 오른쪽 위 → 왼쪽 아래로 퍼짐
+    confetti({ ...base, particleCount: 30, angle: 240, spread: 60, origin: { x: 0.9, y: 0 }, startVelocity: 35 });
+  }
+
+  const handleQuizAnswer = (questionIndex, optionIndex) => {
+    setQuizAnswers((prev) => {
+      const next = [...prev];
+      next[questionIndex] = optionIndex;
+      return next;
+    });
+    setQuizError("");
+  };
+
+  const getQuizProfile = (score) => {
+    // 사용자 제공 분류: 5-8 보수형, 9-12 안정형, 13-16 성장형, 17-20 공격형
+    if (score <= 8) {
+      return {
+        title: "보수형",
+        description: "원금 보호를 최우선으로 하는 보수적인 성향입니다.",
+      };
+    }
+    if (score <= 12) {
+      return {
+        title: "안정형",
+        description: "안정성과 수익성의 균형을 중시하는 성향입니다.",
+      };
+    }
+    if (score <= 16) {
+      return {
+        title: "성장형",
+        description: "중장기 성장을 목표로 변동성을 감수할 준비가 되어 있습니다.",
+      };
+    }
+    return {
+      title: "공격형",
+      description: "고수익을 위해 높은 변동성도 받아들이는 공격적인 성향입니다.",
+    };
+  };
+
+  const handleQuizSubmit = () => {
+    if (quizAnswers.some((answer) => answer === null)) {
+      setQuizError("모든 문항에 답변해 주세요.");
+      setQuizResult(null);
+      return;
+    }
+
+    const score = quizAnswers.reduce(
+      (sum, selectedIndex, index) => sum + quizQuestions[index].options[selectedIndex].score,
+      0,
+    );
+
+    setQuizResult(getQuizProfile(score));
+    setQuizError("");
+  };
+
+  const resetQuiz = () => {
+    // TODO: 배포 시 null로 변경
+    setQuizAnswers(Array(quizQuestions.length).fill(2));
+    setQuizResult(null);
+    setQuizError("");
+  };
+
+  const isQuizComplete = quizAnswers.every((a) => a !== null && a !== undefined);
+
+  function getPortfolioAndRecommendations(profile, amount) {
+    const amountMillion = amount ? Math.floor(amount / 10000) / 100 : 0;
+    const isSmall = amount < 5000000;
+    const isMedium = amount >= 5000000 && amount < 15000000;
+    const isEntrance = amount >= 15000000 && amount < 30000000;
+    const isLarge = amount >= 30000000;
+
+    const baseMap = {
+      "보수형": {
+        emoji: "🛡️",
+        portfolio: [
+          { name: "ETF·주식", value: 10, color: "#03fcf0" },
+          { name: "채권·배당주", value: 30, color: "#03fcf0" },
+          { name: "예적금·현금", value: 60, color: "#6A5A4A" },
+        ],
+        products: [
+          { title: 'TIGER 미국S&P500', desc: '미국 대형주 500개 분산, 장기 우상향 · 1주부터 가능' },
+          { title: '국고채 3년', desc: '정부가 보증, 안정적인 고정 이자' },
+          { title: 'KODEX 단기채권', desc: '변동성 낮은 초단기 채권 ETF' },
+          { title: '파킹통장', desc: '수시 입출금 가능, 연 3~4%대 금리 · 자유입출금' },
+          { title: 'CMA', desc: '하루만 맡겨도 이자 발생 · 하루이자' },
+        ],
+      },
+      "안정형": {
+        emoji: "⚖️",
+        portfolio: [
+          { name: "ETF·주식", value: 30, color: "#03fcf0" },
+          { name: "채권·배당주", value: 40, color: "#03fcf0" },
+          { name: "예적금·현금", value: 30, color: "#6A5A4A" },
+        ],
+        products: [
+          { title: 'TIGER 미국S&P500', desc: '미국 대형주 분산 투자 · 1주부터 가능' },
+          { title: 'KODEX 고배당', desc: '배당 높은 국내 우량주 모음' },
+          { title: 'TIGER 국채3년', desc: '국채 기반 ETF, 안정적 수익' },
+          { title: 'KODEX 회사채AA+', desc: '우량 회사채, 국채보다 금리 높음' },
+          { title: '정기예금', desc: '1~2년 확정 금리, 원금 보장' },
+        ],
+      },
+      "성장형": {
+        emoji: "🌱",
+        portfolio: [
+          { name: "ETF·주식", value: 60, color: "#03fcf0" },
+          { name: "채권·배당주", value: 25, color: "#03fcf0" },
+          { name: "예적금·현금", value: 15, color: "#6A5A4A" },
+        ],
+        products: [
+          { title: 'TIGER 나스닥100', desc: '애플·엔비디아 등 미국 기술주 100개 · 1주부터 가능' },
+          { title: 'KODEX 미국S&P500TR', desc: 'S&P500 배당 자동 재투자형' },
+          { title: 'TIGER 글로벌리츠', desc: '부동산 간접 투자, 배당 수익' },
+          { title: 'TIGER 단기통안채', desc: '중앙은행 발행 초단기 채권' },
+          { title: 'CMA', desc: '여유 자금 단기 운용 · 하루이자' },
+        ],
+      },
+      "공격형": {
+        emoji: "🚀",
+        portfolio: [
+          { name: "ETF·주식", value: 80, color: "#03fcf0" },
+          { name: "채권·배당주", value: 15, color: "#03fcf0" },
+          { name: "예적금·현금", value: 5, color: "#6A5A4A" },
+        ],
+        products: [
+          { title: 'TIGER 나스닥100', desc: '기술주 집중, 고수익 고위험 · 1주부터 가능' },
+          { title: 'KODEX 미국빅테크7', desc: '매그니피센트7 집중 투자' },
+          { title: 'TIGER 인도니프티50', desc: '고성장 인도 시장 직접 투자' },
+          { title: 'KODEX 2차전지', desc: '배터리·전기차 테마 집중' },
+          { title: 'TIGER 단기통안채', desc: '최소한의 안전망' },
+        ],
+      },
+    };
+
+    if (isSmall) {
+      return {
+        emoji: "💪",
+        portfolio: [
+          { name: "ETF·주식", value: 30, color: "#03fcf0" },
+          { name: "예적금·현금", value: 70, color: "#6A5A4A" },
+        ],
+        products: [
+          { title: 'TIGER 미국S&P500', desc: '미국 대형주 분산, 1주부터 가능' },
+          { title: '파킹통장', desc: '연 3~4%대, 언제든 출금 가능 · 자유입출금' },
+          { title: 'CMA', desc: '하루만 맡겨도 이자 발생 · 하루이자' },
+        ],
+        message: '지금은 지키는 게 먼저예요. 소액이라도 ETF로 투자 습관을 만들어요 💪',
+        segmentLabel: '500만원 미만',
+      };
+    }
+
+    if (isMedium) {
+      return {
+        emoji: "🎯",
+        portfolio: [
+          { name: "ETF·주식", value: 40, color: "#03fcf0" },
+          { name: "채권·배당주", value: 20, color: "#03fcf0" },
+          { name: "예적금·현금", value: 40, color: "#6A5A4A" },
+        ],
+        products: [
+          { title: 'TIGER 미국S&P500', desc: '미국 대형주 분산 투자 · 1주부터 가능' },
+          { title: 'TIGER 단기통안채', desc: '중앙은행 발행 초단기 채권' },
+          { title: '파킹통장', desc: '수시 입출금 가능, 연 3~4%대 · 자유입출금' },
+          { title: 'CMA', desc: '여유 자금 단기 운용 · 하루이자' },
+        ],
+        message: 'ETF 1~2개로 단순하게 시작해요. 복잡할 필요 없어요 🎯',
+        segmentLabel: '500~1,500만원',
+      };
+    }
+
+    if (isEntrance) {
+      return {
+        ...baseMap[profile],
+        message: '입문 포트폴리오를 구성할 수 있는 금액이에요 📊',
+        segmentLabel: '1,500~3,000만원 구간',
+      };
+    }
+
+    if (isLarge) {
+      return {
+        ...baseMap[profile],
+        message: '본격적인 포트폴리오를 구성해봐요 🚀',
+        segmentLabel: '3,000만원 이상 구간',
+      };
+    }
+
+    return {
+      ...baseMap[profile],
+      message: '성향과 금액을 함께 고려한 포트폴리오입니다.',
+      segmentLabel: '투자 금액 구간',
+    };
+  }
+
+  // 즉시 시뮬레이션: 퇴직금 만원 단위 절삭 후 투자금으로 설정
+  function handleImmediateSim() {
+    const basePay = directInputMode ? fromComma(directInputStr) : (result && result.pay ? result.pay : 0);
+    const floored = Math.floor(basePay / 10000) * 10000;
+    setInvestmentBase(floored);
+    setShowImmediateSummary(true);
+    setShowEmergencyFlow(false);
+    setCalculatedEmergency(null);
+  }
+
+  // 비상금 계산 로직
+  function computeEmergency() {
+    const basePay = directInputMode ? fromComma(directInputStr) : (result && result.pay ? result.pay : 0);
+    if (!basePay) return;
+    const monthlyMap = [1000000, 1500000, 2500000, 3000000];
+    const monthsMid = [2, 4, 9, 12];
+    const q1 = q1Answer; // 0:이직확정,1:구직중,2:프리,3:수익없음
+    let monthly = q3Answer !== null ? monthlyMap[q3Answer] : 0;
+    let emergencyMonths = 0;
+    if (q1 === 0) {
+      emergencyMonths = 2;
+    } else if (q1 === 1) {
+      if (q2Answer !== null) emergencyMonths = monthsMid[q2Answer];
+    } else if (q1 === 2) {
+      emergencyMonths = 3;
+    } else if (q1 === 3) {
+      if (q2Answer !== null) emergencyMonths = monthsMid[q2Answer];
+    }
+
+    const emergency = monthly * emergencyMonths;
+    const emergencyRounded = Math.floor(emergency / 10000) * 10000;
+    const retirementFloor = Math.floor(basePay / 10000) * 10000;
+    const investable = Math.max(0, retirementFloor - emergencyRounded);
+    setCalculatedEmergency({ emergency: emergencyRounded, retirementFloor, investable });
+    setInvestmentBase(investable);
+    setShowImmediateSummary(false);
+  }
+
+  function computeAllocation() {
+    if (!result || !result.pay) return null;
+    const amount = investmentBase !== null ? investmentBase : result.pay;
+    let pension = 0;
+    let isa = 0;
+    let other = 0;
+    let note = "";
+
+    if (accountPension === "yes") {
+      if (accountISA === "satisfied") {
+        pension = Math.min(Math.floor(amount * 0.67), 6000000);
+        isa = amount - pension;
+        note = "연금저축펀드 납입액의 16.5% 세액공제 예상";
+      } else if (accountISA === "pending") {
+        pension = Math.min(Math.floor(amount * 0.67), 6000000);
+        isa = amount - pension;
+        note = "ISA는 3년 의무기간이 있습니다. 중도해지 시 불이익 주의";
+      } else {
+        pension = Math.min(amount, 6000000);
+        other = amount - pension;
+        note = "ISA 개설을 추천합니다.";
+      }
+    } else {
+      if (accountISA === "satisfied" || accountISA === "pending") {
+        isa = amount;
+        note = "연금저축펀드 개설을 추천합니다.";
+      } else {
+        other = amount;
+        note = "ISA와 연금저축펀드 모두 개설 추천. 세제 혜택을 함께 누려요.";
+      }
+    }
+
+    const floorMan = (v) => Math.floor(v / 10000) * 10000;
+    pension = floorMan(pension);
+    isa = floorMan(isa);
+    other = floorMan(other);
+    const taxBenefit = Math.floor(pension * 0.165);
+    return { amount, pension, isa, other, taxBenefit, note };
+  }
+
+  function getStrategyInfo(rateOrKey) {
+    const key = typeof rateOrKey === "string"
+      ? rateOrKey
+      : rateOrKey <= 4 ? "stable" : rateOrKey <= 7 ? "basic" : "aggressive";
+
+    const strategies = {
+      stable: {
+        label: "📉 안정적",
+        range: "연 3~4%",
+        summary: "예적금·CMA 위주",
+        advantage: "원금 보존, 심리적 안정, 변동성 없음",
+        risk: "물가상승률(연 2~3%) 간신히 따라가는 수준",
+        note: "장기적으로 실질 구매력 하락 가능",
+        midRate: 3.5,
+        assets: {
+          pension: [
+            { name: "TIGER 미국S&P500", desc: "변동성 낮은 대형주, 과세이연으로 안정적 복리", weight: 100 },
+          ],
+          isa: [
+            { name: "TIGER 단기통안채", desc: "중앙은행 발행 초단기 채권, ISA 비과세로 이자 수익 극대화", weight: 100 },
+          ],
+          other: [
+            { name: "CMA", desc: "언제든 출금 가능, 하루이자 발생", weight: 100 },
+          ],
+        },
+      },
+      basic: {
+        label: "📊 균형",
+        range: "연 5~7%",
+        summary: "S&P500 ETF 중심",
+        advantage: "역사적으로 검증된 장기 우상향, 분산 효과",
+        risk: "단기 -30~40% 하락 가능",
+        note: "10년 이상 보유 시 손실 가능성 매우 낮음",
+        midRate: 6,
+        assets: {
+          pension: [
+            { name: "TIGER 미국S&P500", desc: "검증된 장기 우상향 ETF", weight: 60 },
+            { name: "TIGER 나스닥100", desc: "기술주 성장 집중 ETF", weight: 40 },
+          ],
+          isa: [
+            { name: "TIGER 미국S&P500TR", desc: "TR형 배당 자동 재투자 ETF", weight: 70 },
+            { name: "KODEX 미국빅테크7", desc: "ISA 비과세로 배당 재투자 극대화", weight: 30 },
+          ],
+          other: [
+            { name: "CMA", desc: "유동성 확보 및 안전 자산", weight: 100 },
+          ],
+        },
+      },
+      aggressive: {
+        label: "📈 공격적",
+        range: "연 8~10%",
+        summary: "나스닥·빅테크 집중",
+        advantage: "고수익 가능, AI·기술주 성장 수혜",
+        risk: "변동성 극심 (-50% 이상 하락 경험 있음)",
+        note: "멘탈 관리 실패 시 저점 매도 위험",
+        midRate: 9,
+        assets: {
+          pension: [
+            { name: "TIGER 나스닥100", desc: "기술주 집중 고수익 ETF", weight: 50 },
+            { name: "KODEX 미국빅테크7", desc: "빅테크 집중 ETF", weight: 50 },
+          ],
+          isa: [
+            { name: "KODEX 미국빅테크7", desc: "ISA 비과세로 고성장 수익 보호", weight: 60 },
+            { name: "TIGER 인도니프티50", desc: "인도 고성장 시장 ETF", weight: 40 },
+          ],
+          other: [
+            { name: "CMA", desc: "유동성 확보, 비상시 현금성 안전자산", weight: 100 },
+          ],
+        },
+      },
+    };
+    return { key, ...strategies[key] };
+  }
+
+  function updatePortfolioRatio(key, value) {
+    const current = portfolioRatios[key];
+    const delta = value - current;
+    const otherKeys = Object.keys(portfolioRatios).filter((k) => k !== key);
+    const otherTotal = otherKeys.reduce((sum, k) => sum + portfolioRatios[k], 0);
+    const next = { ...portfolioRatios, [key]: value };
+
+    if (otherTotal > 0) {
+      const ratio = (otherTotal - delta) / otherTotal;
+      otherKeys.forEach((k) => {
+        next[k] = Math.max(0, Math.round(portfolioRatios[k] * ratio));
+      });
+    } else {
+      const fill = Math.floor((100 - value) / otherKeys.length);
+      otherKeys.forEach((k) => { next[k] = fill; });
+    }
+
+    const sum = Object.values(next).reduce((s, v) => s + v, 0);
+    const diff = 100 - sum;
+    if (diff !== 0) {
+      const adjustKey = otherKeys[0] || key;
+      next[adjustKey] = Math.max(0, next[adjustKey] + diff);
+    }
+
+    setPortfolioRatios(next);
+  }
+
+  function compoundAmount(principal, rate, years) {
+    return Math.round(principal * Math.pow(1 + rate / 100, years));
+  }
+
+  function handleResetAll() {
+    navigate("calculator");
+    setResult(null);
+    setInvestmentBase(null);
+    setShowEmergencyFlow(false);
+    setShowImmediateSummary(false);
+    setQ1Answer(null);
+    setQ2Answer(null);
+    setQ3Answer(null);
+    setCalculatedEmergency(null);
+    setAccountISA(null);
+    setAccountPension(null);
+    setAllocationResult(null);
+    setForecastRate(6);
+    setSelectedScenario("basic");
+    setPortfolioRatios({ pension: 60, isa: 30, other: 10 });
+    setForecastYears(20);
+    setPurchaseMode("lump");
+    setSplitMonths(3);
+    setAutoInvestOpen(false);
+    setExpandedEtf(null);
+    setShowBuyGuide(null);
+    setDirectInputMode(false);
+    setDirectInputStr("");
+    setTrackingValues({});
+    try { localStorage.removeItem("exit-rich-tracking"); } catch {}
+    resetQuiz();
+    setError("");
+  }
+
+  function updateTracking(id, str, value) {
+    const next = { ...trackingValues, [id]: { str, value } };
+    setTrackingValues(next);
+    try { localStorage.setItem("exit-rich-tracking", JSON.stringify(next)); } catch {}
+  }
+
+  const renderQuiz = () => {
+    const _d = _directionRef.current;
+    const _anim = _d === 0 ? "none" : "pageFadeIn 0.3s ease both";
+    return (
+      <div style={{ animation: _anim, overflowX: "hidden" }}>
+      <div style={{
+        minHeight: "100vh", background: "#0A0A0A",
+        display: "flex", alignItems: "flex-start", justifyContent: "center",
+        padding: "40px 16px 60px", fontFamily: "'Pretendard', 'Apple SD Gothic Neo', sans-serif",
+      }}>
+        <div style={{ width: "100%", maxWidth: 480 }}>
+          <div style={{ marginBottom: 20, paddingBottom: 14, borderBottom: "0.5px solid #232323" }}>
+            <span style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.5px", color: "#FFFFFF" }}>
+              exit <span style={{ color: "#03fcf0" }}>rich</span>
+            </span>
+          </div>
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", background: "#03fcf0", borderRadius: 20, padding: "4px 12px" }}>
+                <span style={{ fontSize: 11, color: "#1A1410", fontWeight: 500 }}>STEP 2 of 5</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { navigate("calculator"); }}
+                style={{
+                  background: "#1C1C1C", border: "0.5px solid #333333", borderRadius: 12,
+                  padding: "10px 14px", fontSize: 12, color: "#9A8A7A", cursor: "pointer",
+                }}
+              >
+                계산 화면으로 돌아가기
+              </button>
+            </div>
+            <h1 style={{ fontSize: 24, fontWeight: 600, color: "#FFFFFF", margin: "4px 0 0" }}>
+              나에게 맞는 투자 스타일 알아보기
+            </h1>
+          </div>
+
+          <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16, border: "0.5px solid #332820", padding: "20px", marginBottom: 20 }}>
+            <p style={{ fontSize: 13, color: "#ffffff", fontWeight: 500, marginBottom: 14 }}>총 {quizQuestions.length}문항으로 간단히 투자 성향을 확인해보세요.</p>
+            {quizQuestions.map((item, index) => (
+              <div key={index} style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#ffffff", marginBottom: 12 }}>
+                  {index + 1}. {item.question}
+                </div>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {item.options.map((option, optionIndex) => {
+                    const selected = quizAnswers[index] === optionIndex;
+                    return (
+                      <button
+                        key={optionIndex}
+                        type="button"
+                        onClick={() => handleQuizAnswer(index, optionIndex)}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "14px 16px",
+                          borderRadius: 12,
+                          border: selected ? "0.5px solid #03fcf0" : "0.5px solid #332820",
+                          background: selected ? "#03fcf0" : "#2A2018",
+                          color: selected ? "#0A0A0A" : "#9A8A7A",
+                          fontWeight: selected ? 500 : undefined,
+                          cursor: "pointer",
+                          fontSize: 13,
+                        }}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            {quizError && (
+              <div style={{ background: "#1A0810", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#FF4D9D", marginBottom: 12 }}>
+                ⚠️ {quizError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleQuizSubmit}
+              disabled={!isQuizComplete}
+              style={{
+                width: "100%",
+                background: isQuizComplete ? "#03fcf0" : "#332820",
+                color: isQuizComplete ? "#0A0A0A" : "#6A5A4A",
+                border: "none", borderRadius: 12, padding: "14px",
+                fontSize: 15, fontWeight: 600,
+                cursor: isQuizComplete ? "pointer" : "not-allowed",
+                fontFamily: "inherit",
+              }}
+            >
+              결과 보기
+            </button>
+          </div>
+
+          {quizResult && (
+            <div style={{ background: "#0E1F1C", boxShadow: "0 2px 12px rgba(0,0,0,0.10)", borderRadius: 16, border: "0.5px solid #0D3030", padding: "24px" }}>
+              <p style={{ fontSize: 12, color: "#03fcf0", fontWeight: 500, marginBottom: 6 }}>투자 성향 분석 완료</p>
+              <h2 style={{ fontSize: 28, fontWeight: 700, color: "#ffffff", margin: "0 0 6px" }}>{quizResult.title}</h2>
+              <p style={{ fontSize: 14, color: "#9A8A7A", margin: 0 }}>{quizResult.description}</p>
+
+              <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={resetQuiz}
+                  style={{
+                    flex: 1, background: "#241C16", color: "#03fcf0",
+                    border: "0.5px solid #03fcf0", borderRadius: 12, padding: "12px",
+                    fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                  }}
+                >
+                  다시 진단하기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const profileRatios = PROFILE_RATIOS[quizResult.title] || { pension: 60, isa: 30, other: 10 };
+                    setPortfolioRatios(profileRatios);
+                    setExpandedEtf(null);
+                    setShowBuyGuide(null);
+                    navigate("map");
+                  }}
+                  style={{
+                    flex: 1, background: "#03fcf0", color: "#0A0A0A",
+                    border: "none", borderRadius: 12, padding: "12px",
+                    fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                  }}
+                >
+                  투자맵 보기 →
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      </div>
+    );
+  };
+
+  const renderAccount = () => {
+    const selectedAmount = investmentBase !== null ? investmentBase : (result && result.pay ? result.pay : 0);
+    const allocation = computeAllocation();
+    const canProceed = accountISA !== null && accountPension !== null;
+    const _d = _directionRef.current;
+    const _anim = _d === 0 ? "none" : "pageFadeIn 0.3s ease both";
+
+    return (
+      <div style={{ animation: _anim, overflowX: "hidden" }}>
+      <div style={{
+        minHeight: "100vh", background: "#0A0A0A",
+        display: "flex", alignItems: "flex-start", justifyContent: "center",
+        padding: "40px 16px 60px", fontFamily: "'Pretendard', 'Apple SD Gothic Neo', sans-serif",
+      }}>
+        <div style={{ width: "100%", maxWidth: 640 }}>
+          <div style={{ marginBottom: 20, paddingBottom: 14, borderBottom: "0.5px solid #232323" }}>
+            <span style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.5px", color: "#FFFFFF" }}>
+              exit <span style={{ color: "#03fcf0" }}>rich</span>
+            </span>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", background: "#03fcf0", borderRadius: 20, padding: "4px 12px" }}>
+                <span style={{ fontSize: 11, color: "#1A1410", fontWeight: 500 }}>STEP 1.5 of 5</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate("calculator")}
+                style={{ background: "#1C1C1C", border: "0.5px solid #333333", borderRadius: 12, padding: "10px 14px", fontSize: 12, color: "#9A8A7A", cursor: "pointer" }}
+              >
+                STEP 1으로 돌아가기
+              </button>
+            </div>
+            <h1 style={{ fontSize: 24, fontWeight: 600, color: "#FFFFFF", margin: 0 }}>
+              계좌 선택하기
+            </h1>
+            <div style={{ marginTop: 6, fontSize: 13, color: "#FFFFFF" }}>
+              실제 투자 금액 {selectedAmount ? formatKRW(selectedAmount) + "원" : "정보 없음"} 기반 배분을 도와드릴게요
+            </div>
+          </div>
+
+          <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16, border: "0.5px solid #332820", padding: 20, marginBottom: 16, animation: "fadeIn 0.3s ease" }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: "#ffffff", marginBottom: 14 }}>Q1. ISA 계좌가 있나요?</p>
+            <div style={{ display: "grid", gap: 10 }}>
+              {[
+                { label: "✅ 있어요 (의무기간 3년 충족)", value: "satisfied" },
+                { label: "⏳ 있어요 (아직 3년 미충족)", value: "pending" },
+                { label: "❌ 없어요", value: "none" },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => { setAccountISA(opt.value); }}
+                  style={{
+                    width: "100%", padding: "14px 16px", borderRadius: 12,
+                    border: accountISA === opt.value ? "0.5px solid #03fcf0" : "0.5px solid #332820",
+                    background: accountISA === opt.value ? "#03fcf0" : "#2A2018",
+                    color: accountISA === opt.value ? "#0A0A0A" : "#9A8A7A",
+                    textAlign: "left", cursor: "pointer", fontSize: 13, fontWeight: accountISA === opt.value ? 600 : 400,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {accountISA !== null && (
+            <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16, border: "0.5px solid #332820", padding: 20, marginBottom: 16, animation: "fadeIn 0.3s ease" }}>
+              <p style={{ fontSize: 14, fontWeight: 600, color: "#ffffff", marginBottom: 14 }}>Q2. 연금저축펀드 계좌가 있나요?</p>
+              <div style={{ display: "grid", gap: 10 }}>
+                {[
+                  { label: "✅ 있어요", value: "yes" },
+                  { label: "❌ 없어요", value: "no" },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => { setAccountPension(opt.value); }}
+                    style={{
+                      width: "100%", padding: "14px 16px", borderRadius: 12,
+                      border: accountPension === opt.value ? "0.5px solid #03fcf0" : "0.5px solid #332820",
+                      background: accountPension === opt.value ? "#03fcf0" : "#2A2018",
+                      color: accountPension === opt.value ? "#0A0A0A" : "#9A8A7A",
+                      textAlign: "left", cursor: "pointer", fontSize: 13, fontWeight: accountPension === opt.value ? 600 : 400,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(accountISA !== null && accountPension !== null) && allocation && (
+            <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16, border: "0.5px solid #332820", padding: 20, marginBottom: 20, animation: "fadeIn 0.3s ease" }}>
+              <div style={{ display: "grid", gap: 12 }}>
+                <div style={{ padding: 16, background: "#2A2018", borderRadius: 16, border: "0.5px solid #332820" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, color: "#03fcf0", fontSize: 13 }}>
+                    <span>연금저축펀드</span>
+                    <span>{allocation.pension ? formatKRW(allocation.pension) + "원" : "0원"}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#9A8A7A" }}>세액공제 + ETF 투자</div>
+                </div>
+                <div style={{ padding: 16, background: "#2A2018", borderRadius: 16, border: "0.5px solid #332820" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, color: "#03fcf0", fontSize: 13 }}>
+                    <span>{allocation.isa ? "ISA" : "일반 증권계좌"}</span>
+                    <span>{allocation.isa ? formatKRW(allocation.isa) + "원" : formatKRW(allocation.other) + "원"}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#9A8A7A" }}>{allocation.isa ? "비과세 + 자유로운 투자" : "일반 증권계좌에 전액 배분"}</div>
+                </div>
+                <div style={{ padding: 16, background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16, border: "0.5px solid #332820" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13, color: "#ffffff" }}>
+                    <span>실투자금</span>
+                    <span>{formatKRW(allocation.amount)}원</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#03fcf0" }}>
+                    <span>예상 세금 혜택</span>
+                    <span>{formatKRW(allocation.taxBenefit)}원</span>
+                  </div>
+                </div>
+              </div>
+              <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "#241C16", border: "0.5px solid #332820", color: "#03fcf0", fontSize: 13 }}>
+                {allocation.note}
+              </div>
+              <button
+                type="button"
+                onClick={() => { setAllocationResult(allocation); navigate("quiz"); resetQuiz(); }}
+                style={{ width: "100%", marginTop: 16, background: "#03fcf0", color: "#0A0A0A", border: "none", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
+                onMouseEnter={(e) => (e.target.style.background = "#03fcf0")}
+                onMouseLeave={(e) => (e.target.style.background = "#03fcf0")}
+              >
+                성향 퀴즈 시작하기 →
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      </div>
+    );
+  };
+
+  const renderMap = () => {
+    const profile = quizResult ? quizResult.title : "안정형";
+    const retirementAmount = result && result.pay ? result.pay : 0;
+    const baseAmount = investmentBase ? investmentBase : retirementAmount;
+    const allocation = computeAllocation() || { amount: 0, pension: 0, isa: 0, other: 0, taxBenefit: 0, note: "" };
+    const strategy = getStrategyInfo(forecastRate);
+    const scenario20 = allocation.amount ? compoundAmount(allocation.amount, strategy.midRate, 20) : 0;
+    const portfolioRate = calcPortfolioRate(strategy, portfolioRatios);
+    const portfolioRatePct = (portfolioRate * 100).toFixed(2);
+    const portfolioPreview20 = allocation.amount
+      ? Math.floor(allocation.amount * Math.pow(1 + portfolioRate, 20) / 10000)
+      : 0;
+    const totalCardList = [
+      {
+        label: "💚 연금저축펀드",
+        amount: allocation.pension,
+        detail: `세액공제 예상액 -${formatKRW(allocation.taxBenefit)}원`,
+        color: "#03fcf0",
+        background: "#241C16",
+      },
+      {
+        label: "📊 ISA",
+        amount: allocation.isa,
+        detail: "비과세 한도 200만원",
+        color: "#03fcf0",
+        background: "#241C16",
+      },
+      {
+        label: "💼 CMA",
+        amount: allocation.other,
+        detail: "언제든 출금 가능한 현금성 자산",
+        color: "#9A8A7A",
+        background: "#332820",
+      },
+    ];
+
+    const ratioAmounts = {
+      pension: Math.round(allocation.amount * portfolioRatios.pension / 100),
+      isa: Math.round(allocation.amount * portfolioRatios.isa / 100),
+      other: Math.round(allocation.amount * portfolioRatios.other / 100),
+    };
+
+    const ratioDetails = {
+      pension: {
+        title: "연금저축펀드",
+        amount: ratioAmounts.pension,
+        assets: strategy.assets.pension,
+        reason: strategy.key === "stable"
+          ? "변동성 낮은 대형주, 과세이연으로 안정적 복리"
+          : strategy.key === "basic"
+            ? "검증된 장기 우상향 + 과세이연 극대화"
+            : "기술주 집중 고수익, 장기 과세이연으로 세금 부담 최소화",
+      },
+      isa: {
+        title: "ISA",
+        amount: ratioAmounts.isa,
+        assets: strategy.assets.isa,
+        reason: strategy.key === "stable"
+          ? "중앙은행 발행 초단기 채권, ISA 비과세로 이자 수익 극대화"
+          : strategy.key === "basic"
+            ? "TR형 배당 비과세 재투자 + 빅테크 집중"
+            : "비과세로 고성장 수익 보호, 빅테크·인도 성장 수혜",
+      },
+      other: {
+        title: "CMA",
+        amount: ratioAmounts.other,
+        assets: strategy.assets.other,
+        reason: "언제든 출금 가능, 하루이자 발생",
+      },
+    };
+
+    const _d = _directionRef.current;
+    const _anim = _d === 0 ? "none" : "pageFadeIn 0.3s ease both";
+    return (
+      <div style={{ animation: _anim, overflowX: "hidden" }}>
+      <div style={{
+        minHeight: "100vh", background: "#0A0A0A",
+        display: "flex", alignItems: "flex-start", justifyContent: "center",
+        padding: "40px 16px 60px", fontFamily: "'Pretendard', 'Apple SD Gothic Neo', sans-serif",
+      }}>
+        <div style={{ width: "100%", maxWidth: 840 }}>
+          <div style={{ marginBottom: 20, paddingBottom: 14, borderBottom: "0.5px solid #232323" }}>
+            <span style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.5px", color: "#FFFFFF" }}>
+              exit <span style={{ color: "#03fcf0" }}>rich</span>
+            </span>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", background: "#03fcf0", borderRadius: 20, padding: "4px 12px" }}>
+                <span style={{ fontSize: 11, color: "#1A1410", fontWeight: 500 }}>STEP 3 of 5</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate("quiz")}
+                style={{ background: "#1C1C1C", border: "0.5px solid #333333", borderRadius: 12, padding: "10px 14px", fontSize: 12, color: "#9A8A7A", cursor: "pointer" }}
+              >
+                뒤로가기
+              </button>
+            </div>
+            <h1 style={{ fontSize: 24, fontWeight: 600, color: "#FFFFFF", margin: 0 }}>
+              계좌별 투자배분
+            </h1>
+            <div style={{ marginTop: 6, fontSize: 13, color: "#FFFFFF" }}>
+              실제 투자 금액 {baseAmount ? formatKRW(baseAmount) + "원" : "정보 없음"} · {strategy.label} 전략
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14, marginBottom: 24 }}>
+            {totalCardList.filter((card) => card.amount > 0).map((card) => (
+              <div key={card.label} style={{ background: card.background, boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 18, border: `0.5px solid ${card.color}33`, padding: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: card.color }}>{card.label}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#ffffff" }}>{formatKRW(card.amount)}원</div>
+                </div>
+                <div style={{ fontSize: 13, color: "#6A5A4A" }}>{card.detail}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginBottom: 20 }}>
+            {[
+              { key: "stable", label: "📉 안정적", range: "3~4%" },
+              { key: "basic", label: "📊 균형", range: "5~7%" },
+              { key: "aggressive", label: "📈 공격적", range: "8~10%" },
+            ].map((option) => {
+              const selected = selectedScenario === option.key;
+              const config = getStrategyInfo(option.key);
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => {
+                    setSelectedScenario(option.key);
+                    setForecastRate(config.midRate);
+                    setExpandedEtf(null);
+                    setShowBuyGuide(null);
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "16px 18px",
+                    borderRadius: 16,
+                    border: selected ? "0.5px solid #03fcf0" : "0.5px solid #332820",
+                    background: selected ? "#03fcf0" : "#2A2018",
+                    color: selected ? "#0A0A0A" : "#9A8A7A",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    fontWeight: 700,
+                  }}
+                >
+                  <div>{option.label}</div>
+                  <div style={{ marginTop: 8, fontSize: 12, color: selected ? "#0A0A0A" : "#9A8A7A" }}>{option.range}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 18, border: "0.5px solid #332820", padding: 24, marginBottom: 24, animation: "fadeIn 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
+              <div style={{ minWidth: 240 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#ffffff", marginBottom: 10 }}>수익률 선택</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: "#03fcf0", lineHeight: 1.3 }}>{strategy.label}</div>
+                <div style={{ marginTop: 8, fontSize: 13, color: "#9A8A7A" }}>{strategy.range}</div>
+                <div style={{ marginTop: 14, fontSize: 14, color: "#ffffff", lineHeight: 1.6 }}>
+                  <div>장점: {strategy.advantage}</div>
+                  <div>단점: {strategy.risk}</div>
+                </div>
+              </div>
+              <div style={{ minWidth: 240, background: "#2A2018", borderRadius: 16, padding: 18 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#ffffff", marginBottom: 10 }}>20년 후 예상</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: "#03fcf0" }}>{allocation.amount ? `약 ${formatKRW(Math.floor(scenario20 / 10000))}만원` : "정보 없음"}</div>
+                <div style={{ marginTop: 10, fontSize: 13, color: "#9A8A7A" }}>실제 투자금액 × (1 + 수익률중간값)<sup>20</sup></div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 16, marginBottom: 20 }}>
+            {Object.entries(ratioDetails).map(([key, item]) => (
+              <div key={key} style={{ background: key === "pension" ? "#241C16" : key === "isa" ? "#241C16" : "#332820", borderRadius: 18, border: "0.5px solid #332820", padding: 22 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14, marginBottom: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: key === "pension" ? "#03fcf0" : key === "isa" ? "#03fcf0" : "#9A8A7A" }}>{item.title}</div>
+                    <div style={{ marginTop: 6, fontSize: 13, color: "#ffffff" }}>{formatKRW(item.amount)}원</div>
+                  </div>
+                  <div style={{ fontSize: 13, color: "#9A8A7A", maxWidth: 240 }}>{item.reason}</div>
+                </div>
+                <div style={{ display: "grid", gap: 12 }}>
+                  {(() => {
+                    const assetAmounts = calcAssetAmounts(item.amount, item.assets);
+                    return item.assets.map((asset, idx) => {
+                    const details = ETF_DETAILS[asset.name];
+                    const etfCardKey = `${key}_${asset.name}`;
+                    const isExpanded = expandedEtf === etfCardKey;
+                    const isShowingBuyGuide = showBuyGuide === etfCardKey;
+                    const assetAmt = assetAmounts[idx] ?? 0;
+                    const assetAmtMan = Math.floor(assetAmt / 10000);
+
+                    if (!details) {
+                      return (
+                        <div key={idx} style={{ padding: 12, borderRadius: 14, background: "#241C16", border: "0.5px solid #332820" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                            <div>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: "#ffffff" }}>{asset.name}</div>
+                              <div style={{ marginTop: 4, fontSize: 12, color: "#9A8A7A" }}>{asset.desc}</div>
+                            </div>
+                            <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 10 }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#03fcf0" }}>{asset.weight ?? 100}%</div>
+                              {assetAmt > 0 && <div style={{ fontSize: 12, color: "#9A8A7A", marginTop: 2 }}>{assetAmtMan.toLocaleString("ko-KR")}만원</div>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={idx} style={{ borderRadius: 14, background: "#241C16", border: `0.5px solid ${isExpanded ? "#03fcf0" : "#332820"}`, overflow: "hidden", transition: "border-color 0.2s" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isExpanded) {
+                              setExpandedEtf(null);
+                              setShowBuyGuide(null);
+                            } else {
+                              setExpandedEtf(etfCardKey);
+                              setShowBuyGuide(null);
+                            }
+                          }}
+                          style={{ width: "100%", padding: 12, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: "#ffffff" }}>{asset.name}</div>
+                              <div style={{ marginTop: 4, fontSize: 12, color: "#9A8A7A" }}>{asset.desc}</div>
+                            </div>
+                            <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 10 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: "#03fcf0" }}>{asset.weight ?? 100}%</span>
+                                <span style={{ fontSize: 11, color: "#9A8A7A" }}>{isExpanded ? "▲" : "▼"}</span>
+                              </div>
+                              {assetAmt > 0 && <div style={{ fontSize: 12, color: "#9A8A7A", marginTop: 2 }}>{assetAmtMan.toLocaleString("ko-KR")}만원</div>}
+                            </div>
+                          </div>
+                        </button>
+
+                        {isExpanded && (
+                          <div style={{ padding: "0 14px 14px", borderTop: "0.5px solid #332820", animation: "fadeIn 0.2s ease" }}>
+                            <div style={{ paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", fontSize: 13, color: "#ffffff", lineHeight: 1.8 }}>
+                                <span style={{ color: "#9A8A7A", whiteSpace: "nowrap" }}>운용사</span>
+                                <span>{details.manager}</span>
+                                <span style={{ color: "#9A8A7A", whiteSpace: "nowrap" }}>총보수</span>
+                                <span>{details.fee}</span>
+                                <span style={{ color: "#9A8A7A", whiteSpace: "nowrap" }}>담고 있는 것</span>
+                                <span>{details.holdings}</span>
+                                <span style={{ color: "#9A8A7A", whiteSpace: "nowrap" }}>최근 수익률</span>
+                                <span>1개월 {details.returns.month1} / 6개월 {details.returns.month6} / 1년 {details.returns.year1}</span>
+                              </div>
+
+                              <div style={{ marginTop: 4, padding: "10px 12px", background: "#241C0A", borderRadius: 8, fontSize: 12, color: "#ff9800", lineHeight: 1.7 }}>
+                                ⚡ <strong>변동성</strong> · {details.volatility}
+                              </div>
+
+                              <div style={{ padding: "10px 12px", background: "#0E1F1C", borderRadius: 8, fontSize: 12, color: "#03fcf0", lineHeight: 1.7 }}>
+                                💡 <strong>MZ 추천 이유</strong> · {details.mzReason}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setShowBuyGuide(isShowingBuyGuide ? null : etfCardKey); }}
+                                style={{
+                                  marginTop: 4, width: "100%", padding: "10px 14px",
+                                  background: isShowingBuyGuide ? "#03fcf0" : "#241C16",
+                                  color: isShowingBuyGuide ? "#0A0A0A" : "#03fcf0",
+                                  border: "0.5px solid #03fcf0", borderRadius: 10,
+                                  fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                                }}
+                              >
+                                <span>📱 나무증권에서 매수하는 법</span>
+                                <span style={{ fontSize: 11 }}>{isShowingBuyGuide ? "▲" : "▼"}</span>
+                              </button>
+
+                              {isShowingBuyGuide && (
+                                <div style={{ padding: "14px", background: "#2A2018", borderRadius: 10, border: "0.5px solid #332820", fontSize: 13, color: "#ffffff", lineHeight: 2, animation: "fadeIn 0.2s ease" }}>
+                                  1. 나무증권 앱 실행<br />
+                                  2. 하단 주식 탭 → 검색창에 <strong>{asset.name}</strong> 입력<br />
+                                  3. 종목 클릭 → 매수 버튼<br />
+                                  4. 수량 입력 (1주부터 가능)<br />
+                                  5. 시장가 주문 → 매수 완료
+                                  <div style={{ marginTop: 10, padding: "8px 12px", background: "#0E1F1C", borderRadius: 8, fontSize: 12, color: "#03fcf0" }}>
+                                    💡 자동 적립: 나무증권 → 해당 ETF → 자동투자 설정
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+                </div>
+                <div style={{ marginTop: 18 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#ffffff" }}>비율 조정</div>
+                    <div style={{ fontSize: 13, color: "#9A8A7A" }}>{portfolioRatios[key]}%</div>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={portfolioRatios[key]}
+                    onChange={(e) => updatePortfolioRatio(key, Number(e.target.value))}
+                    style={{ width: "100%", accentColor: "#03fcf0" }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 18, border: "0.5px solid #332820", padding: 18, color: "#03fcf0", fontSize: 13, marginBottom: 24 }}>
+            💡 같은 S&P500이라도 연금저축펀드에는 일반형, ISA에는 TR(배당재투자)형을 담아요. ISA에서는 배당이 비과세로 자동 재투자되어 장기 복리 효과가 더 커요.
+          </div>
+
+          <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 18, border: "0.5px solid #332820", padding: 18, marginBottom: 20 }}>
+            <div style={{ fontSize: 13, color: "#03fcf0" }}>💡 1년에 한 번, 비율이 흐트러지면 리밸런싱 해주세요.</div>
+          </div>
+
+          {/* 포트폴리오 수익률 실시간 표시 */}
+          <div style={{ background: "#0E1F1C", boxShadow: "0 2px 12px rgba(0,0,0,0.10)", borderRadius: 18, border: "0.5px solid #0D3030", padding: 22, marginBottom: 20 }}>
+            <div style={{ fontSize: 13, color: "#03fcf0", marginBottom: 6 }}>내 포트폴리오 예상 수익률</div>
+            <div style={{ fontSize: 32, fontWeight: 700, color: "#ffffff", marginBottom: portfolioPreview20 > 0 ? 10 : 0 }}>
+              연 {portfolioRatePct}%
+            </div>
+            {portfolioPreview20 > 0 && (
+              <div style={{ fontSize: 15, color: "#03fcf0", fontWeight: 500 }}>
+                20년 후 예상: 약 <strong>{portfolioPreview20.toLocaleString("ko-KR")}만원</strong>
+              </div>
+            )}
+            <div style={{ marginTop: 14, fontSize: 11, color: "#6A5A4A", lineHeight: 1.7 }}>
+              ⚠️ 기대수익률은 과거 데이터 기반 추정치로, 미래 수익을 보장하지 않아요.<br />
+              실제 수익률은 시장 상황에 따라 달라질 수 있어요.
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => navigate("quiz")}
+              style={{ flex: 1, minWidth: 240, background: "#1C1C1C", color: "#9A8A7A", border: "0.5px solid #333333", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
+            >
+              STEP 2로 돌아가기
+            </button>
+            <button
+              type="button"
+              onClick={() => { navigate("forecast"); }}
+              style={{ flex: 1, minWidth: 240, background: "#03fcf0", color: "#0A0A0A", border: "none", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
+            >
+              수익 예측 보기 →
+            </button>
+          </div>
+        </div>
+      </div>
+      </div>
+    );
+  };
+
+  const renderForecast = () => {
+    const retirementAmount = result && result.pay ? result.pay : 0;
+    const selectedAmount = investmentBase ? investmentBase : retirementAmount;
+    const allocation = computeAllocation() || { amount: 0, pension: 0, isa: 0, other: 0, taxBenefit: 0, note: "" };
+    const strategy = getStrategyInfo(forecastRate);
+    const portfolioRate = calcPortfolioRate(strategy, portfolioRatios);
+    const portfolioRatePct = (portfolioRate * 100).toFixed(2);
+
+    const calcForecast = (amount, years) => {
+      if (purchaseMode === "lump") {
+        return Math.round(amount * Math.pow(1 + portfolioRate, years));
+      }
+      const installment = amount / splitMonths;
+      let total = 0;
+      for (let n = 1; n <= splitMonths; n++) {
+        const holdingYears = Math.max(0, years - n / 12);
+        total += installment * Math.pow(1 + portfolioRate, holdingYears);
+      }
+      return Math.round(total);
+    };
+
+    const finalAmount = calcForecast(selectedAmount, forecastYears);
+    const totalProfit = Math.max(0, finalAmount - selectedAmount);
+    const monthlyIncrease = forecastYears > 0 ? Math.round(totalProfit / (forecastYears * 12)) : 0;
+
+    const barYears = [1, 5, 10, 20];
+    const bars = barYears.map((year) => {
+      const amount = calcForecast(selectedAmount, year);
+      const profit = Math.max(0, amount - selectedAmount);
+      return { year, amount, profit };
+    });
+    const maxAmount = Math.max(...bars.map((b) => b.amount), 1);
+
+    const realValue = Math.round(finalAmount / Math.pow(1.025, forecastYears));
+    const taxBenefit = allocation.taxBenefit || Math.floor((allocation.pension || 0) * 0.165);
+
+    const now = new Date();
+    const monthNames = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"];
+    const getMonthLabel = (offset) => monthNames[(now.getMonth() + offset) % 12];
+
+    const monthlyAmt = selectedAmount > 0 ? Math.round(selectedAmount / splitMonths) : 0;
+    const monthlyPension = allocation.pension ? Math.round(allocation.pension / splitMonths) : 0;
+    const monthlyIsa = allocation.isa ? Math.round(allocation.isa / splitMonths) : 0;
+    const monthlyCma = allocation.other ? Math.round(allocation.other / splitMonths) : 0;
+    const _d = _directionRef.current;
+    const _anim = _d === 0 ? "none" : "pageFadeIn 0.3s ease both";
+
+    return (
+      <div style={{ animation: _anim, overflowX: "hidden" }}>
+      <div style={{
+        minHeight: "100vh", background: "#0A0A0A",
+        display: "flex", alignItems: "flex-start", justifyContent: "center",
+        padding: "40px 16px 60px", fontFamily: "'Pretendard', 'Apple SD Gothic Neo', sans-serif",
+      }}>
+        <div style={{ width: "100%", maxWidth: 760 }}>
+
+          {/* 브랜드 헤더 */}
+          <div style={{ marginBottom: 20, paddingBottom: 14, borderBottom: "0.5px solid #232323" }}>
+            <span style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.5px", color: "#FFFFFF" }}>
+              exit <span style={{ color: "#03fcf0" }}>rich</span>
+            </span>
+          </div>
+
+          {/* 헤더 */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", background: "#03fcf0", borderRadius: 20, padding: "4px 12px" }}>
+                <span style={{ fontSize: 11, color: "#1A1410", fontWeight: 500 }}>STEP 4 of 5</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate("map")}
+                style={{ background: "#1C1C1C", border: "0.5px solid #333333", borderRadius: 12, padding: "10px 14px", fontSize: 12, color: "#9A8A7A", cursor: "pointer" }}
+              >
+                뒤로가기
+              </button>
+            </div>
+            <h1 style={{ fontSize: 24, fontWeight: 600, color: "#FFFFFF", margin: 0 }}>수익 예측하기</h1>
+            <div style={{ marginTop: 6, fontSize: 13, color: "#FFFFFF" }}>
+              {selectedAmount ? `${Math.floor(selectedAmount / 10000).toLocaleString("ko-KR")}만원` : "정보 없음"} · {strategy.label}
+            </div>
+          </div>
+
+          {/* 1. 일시납 vs 분할매수 */}
+          <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 18, border: "0.5px solid #332820", padding: 24, marginBottom: 20 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#ffffff", marginBottom: 14 }}>언제 투자할까요?</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {[
+                { key: "lump", icon: "⚡", title: "일시납", desc: "지금 한 번에 전액 투자" },
+                { key: "split", icon: "📅", title: "분할매수", desc: "나눠서 투자" },
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setPurchaseMode(opt.key)}
+                  style={{
+                    padding: "16px", borderRadius: 14,
+                    border: purchaseMode === opt.key ? "0.5px solid #03fcf0" : "0.5px solid #332820",
+                    background: purchaseMode === opt.key ? "#03fcf0" : "#2A2018",
+                    textAlign: "left", cursor: "pointer", transition: "all 0.15s",
+                  }}
+                >
+                  <div style={{ fontSize: 18, marginBottom: 6 }}>{opt.icon}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: purchaseMode === opt.key ? "#0A0A0A" : "#9A8A7A" }}>{opt.title}</div>
+                  <div style={{ fontSize: 12, color: purchaseMode === opt.key ? "#0A0A0A" : "#9A8A7A", marginTop: 4 }}>{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            {purchaseMode === "lump" && (
+              <div style={{ marginTop: 14, padding: "12px 14px", background: "#2A2018", borderRadius: 12, fontSize: 12, color: "#9A8A7A", lineHeight: 1.7, animation: "fadeIn 0.2s ease" }}>
+                ✅ <strong style={{ color: "#ffffff" }}>장점:</strong> 시장 노출 기간 최대화, 통계적으로 장기 수익률 유리<br />
+                ⚠️ <strong style={{ color: "#ffffff" }}>단점:</strong> 고점 매수 시 심리적 부담
+              </div>
+            )}
+
+            {purchaseMode === "split" && (
+              <div style={{ animation: "fadeIn 0.2s ease" }}>
+                <div style={{ marginTop: 14, padding: "12px 14px", background: "#2A2018", borderRadius: 12, fontSize: 12, color: "#9A8A7A", lineHeight: 1.7 }}>
+                  ✅ <strong style={{ color: "#ffffff" }}>장점:</strong> 평균 매수단가 낮춤, 심리적 안정<br />
+                  ⚠️ <strong style={{ color: "#ffffff" }}>단점:</strong> 현금 대기 기간 기회비용 발생
+                </div>
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#ffffff", marginBottom: 10 }}>몇 개월에 나눠서 투자할까요?</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                    {[2, 3, 6].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setSplitMonths(m)}
+                        style={{
+                          padding: "12px 0", borderRadius: 12,
+                          border: splitMonths === m ? "0.5px solid #03fcf0" : "0.5px solid #332820",
+                          background: splitMonths === m ? "#03fcf0" : "#2A2018",
+                          color: splitMonths === m ? "#0A0A0A" : "#9A8A7A",
+                          fontWeight: 700, cursor: "pointer", fontSize: 14,
+                        }}
+                      >
+                        {m}개월
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {selectedAmount > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#ffffff", marginBottom: 10 }}>월별 투자 스케줄</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {Array.from({ length: splitMonths }, (_, i) => (
+                        <div key={i} style={{ padding: "12px 14px", background: "#2A2018", borderRadius: 12, border: "0.5px solid #332820", animation: "fadeIn 0.2s ease" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: "#03fcf0" }}>📅 {getMonthLabel(i)}</span>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: "#ffffff" }}>{Math.floor(monthlyAmt / 10000).toLocaleString("ko-KR")}만원</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#9A8A7A", lineHeight: 1.6 }}>
+                            {monthlyPension > 0 && `연금저축펀드 ${Math.floor(monthlyPension / 10000).toLocaleString("ko-KR")}만원`}
+                            {monthlyPension > 0 && monthlyIsa > 0 && " + "}
+                            {monthlyIsa > 0 && `ISA ${Math.floor(monthlyIsa / 10000).toLocaleString("ko-KR")}만원`}
+                            {(monthlyPension > 0 || monthlyIsa > 0) && monthlyCma > 0 && " + "}
+                            {monthlyCma > 0 && `CMA ${Math.floor(monthlyCma / 10000).toLocaleString("ko-KR")}만원`}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 2. 투자 기간 선택 */}
+          <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16, border: "0.5px solid #332820", padding: 18, marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#ffffff", marginBottom: 12 }}>투자 기간</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+              {[1, 5, 10, 20].map((year) => (
+                <button
+                  key={year}
+                  type="button"
+                  onClick={() => setForecastYears(year)}
+                  style={{
+                    borderRadius: 12, padding: "12px 0",
+                    border: forecastYears === year ? "0.5px solid #03fcf0" : "0.5px solid #332820",
+                    background: forecastYears === year ? "#03fcf0" : "#2A2018",
+                    color: forecastYears === year ? "#0A0A0A" : "#9A8A7A",
+                    fontWeight: 700, cursor: "pointer", fontSize: 14,
+                  }}
+                >
+                  {year}년
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. 메인 수치 */}
+          <div style={{ background: "#0E1F1C", boxShadow: "0 2px 12px rgba(0,0,0,0.10)", borderRadius: 18, border: "0.5px solid #0D3030", padding: 28, marginBottom: 20, animation: "fadeIn 0.3s ease" }}>
+            <div style={{ fontSize: 13, color: "#03fcf0", marginBottom: 8 }}>{strategy.label} · 포트폴리오 가중평균 연 {portfolioRatePct}%</div>
+            <div style={{ fontSize: 32, fontWeight: 700, color: "#ffffff", lineHeight: 1.2, marginBottom: 14 }}>
+              {forecastYears}년 후 {animatedFinalMan.toLocaleString("ko-KR")}만원이 돼요
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ fontSize: 15, color: "#FF4D9D", fontWeight: 500 }}>
+                원금보다 <strong>{Math.floor(totalProfit / 10000).toLocaleString("ko-KR")}만원</strong> 더 불어났어요
+              </div>
+              <div style={{ fontSize: 13, color: "#FF4D9D" }}>
+                매달 평균 <strong>{Math.floor(monthlyIncrease / 10000).toLocaleString("ko-KR")}만원</strong>씩 증가한 셈이에요
+              </div>
+            </div>
+          </div>
+
+          {/* 4. 바 차트 */}
+          <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 18, border: "0.5px solid #332820", padding: 20, marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#ffffff" }}>연도별 수익 비교</div>
+              <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#9A8A7A" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: "#332820", display: "inline-block" }} />원금
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: "#03fcf0", display: "inline-block" }} />수익
+                </span>
+              </div>
+            </div>
+            <div key={bars.map(b => b.amount).join('-')} style={{ display: "flex", gap: 12, alignItems: "flex-end", height: 280 }}>
+              {bars.map((bar, i) => {
+                const profitRatio = bar.amount > 0 ? Math.round((bar.profit / bar.amount) * 100) : 0;
+                const principalRatio = 100 - profitRatio;
+                const barHeight = Math.max(60, (bar.amount / maxAmount) * 230);
+                const isSelected = forecastYears === bar.year;
+                return (
+                  <div key={bar.year} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: isSelected ? "#03fcf0" : "#9A8A7A", textAlign: "center" }}>
+                      {Math.floor(bar.amount / 10000).toLocaleString("ko-KR")}만
+                    </div>
+                    <div
+                      style={{
+                        width: "100%", height: barHeight,
+                        borderRadius: 10, overflow: "hidden",
+                        outline: isSelected ? "2px solid #03fcf0" : "none",
+                        outlineOffset: 1,
+                      }}
+                    >
+                      <div style={{
+                        width: "100%", height: "100%",
+                        display: "flex", flexDirection: "column",
+                        transformOrigin: "bottom",
+                        animation: `barRise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both`,
+                        animationDelay: `${i * 0.1}s`,
+                      }}>
+                        <div style={{ flex: `0 0 ${profitRatio}%`, background: isSelected ? "#FF4D9D" : "#03fcf0" }} />
+                        <div style={{ flex: `0 0 ${principalRatio}%`, background: "#332820" }} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: isSelected ? "#03fcf0" : "#ffffff", textAlign: "center" }}>{bar.year}년</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 면책 문구 */}
+          <div style={{ fontSize: 11, color: "#999999", lineHeight: 1.7, marginBottom: 16, padding: "0 4px" }}>
+            ⚠️ 기대수익률은 과거 데이터 기반 추정치로, 미래 수익을 보장하지 않아요.<br />
+            실제 수익률은 시장 상황에 따라 달라질 수 있어요.
+          </div>
+
+          {/* 5. 인플레이션 반영 실질 수익률 */}
+          <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16, border: "0.5px solid #332820", padding: 18, marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#ffffff", marginBottom: 10 }}>인플레이션 반영 실질 수익률</div>
+            <div style={{ padding: "14px", background: "#2A2018", borderRadius: 12, fontSize: 13, color: "#ffffff", lineHeight: 1.8 }}>
+              📌 물가를 감안하면 {forecastYears}년 후 실질 가치는 약{" "}
+              <strong style={{ color: "#03fcf0" }}>{Math.floor(realValue / 10000).toLocaleString("ko-KR")}만원</strong>이에요.<br />
+              인플레이션(연 2.5%)을 이기려면 연 2.5% 이상 수익이 필요해요.
+            </div>
+          </div>
+
+          {/* 6. 세액공제 혜택 포함 실질 수익 */}
+          {taxBenefit > 0 && (
+            <div style={{ background: "#241C16", borderRadius: 16, border: "0.5px solid #0D3030", padding: 18, marginBottom: 16, animation: "fadeIn 0.3s ease" }}>
+              <div style={{ fontSize: 13, color: "#03fcf0", lineHeight: 1.8 }}>
+                💚 연금저축펀드 세액공제<strong>{Math.floor(taxBenefit / 10000).toLocaleString("ko-KR")}만원</strong>을 더하면<br />
+                실질 투자 원금은 <strong>{Math.floor(Math.max(0, selectedAmount - taxBenefit) / 10000).toLocaleString("ko-KR")}만원</strong>,
+                {" "}실질 수익률은 더 높아요.
+              </div>
+            </div>
+          )}
+
+          {/* 7. 자동 매수 설정 안내 (분할매수 선택 시) */}
+          {purchaseMode === "split" && (
+            <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16, border: "0.5px solid #332820", marginBottom: 20, overflow: "hidden", animation: "fadeIn 0.2s ease" }}>
+              <button
+                type="button"
+                onClick={() => setAutoInvestOpen(!autoInvestOpen)}
+                style={{
+                  width: "100%", padding: "16px 18px",
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#ffffff" }}>📱 자동 매수 설정하는 법</span>
+                <span style={{ fontSize: 12, color: "#9A8A7A" }}>{autoInvestOpen ? "접기 ▲" : "펼치기 ▼"}</span>
+              </button>
+              {autoInvestOpen && (
+                <div style={{ padding: "0 18px 18px", animation: "fadeIn 0.2s ease" }}>
+                  <div style={{ fontSize: 13, color: "#ffffff", lineHeight: 1.9, borderTop: "0.5px solid #332820", paddingTop: 14 }}>
+                    매달 신경 쓰지 않아도 자동으로 투자할 수 있어요.
+                  </div>
+                  <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                    {[
+                      { brokerage: "미래에셋증권", method: "주식/ETF → 정기투자 설정" },
+                      { brokerage: "키움증권", method: "자동주문 → 정기매수" },
+                      { brokerage: "한국투자증권", method: "ETF → 자동적립식 매수" },
+                    ].map((item) => (
+                      <div key={item.brokerage} style={{ padding: "10px 12px", background: "#2A2018", borderRadius: 10, border: "0.5px solid #332820", fontSize: 13 }}>
+                        <span style={{ fontWeight: 600, color: "#03fcf0" }}>- {item.brokerage}:</span>{" "}
+                        <span style={{ color: "#ffffff" }}>{item.method}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 12, fontSize: 12, color: "#9A8A7A" }}>
+                    날짜와 금액만 설정하면 매달 알아서 사줘요 🙌
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 8. 포트폴리오 트래킹 이동 + 처음부터 다시하기 */}
+          <button
+            type="button"
+            onClick={() => navigate("tracking")}
+            style={{
+              width: "100%", background: "#03fcf0", color: "#0A0A0A",
+              border: "none", borderRadius: 14, padding: "16px",
+              fontSize: 16, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+              marginBottom: 10,
+            }}
+          >
+            포트폴리오 트래킹 →
+          </button>
+          <button
+            type="button"
+            onClick={handleResetAll}
+            style={{
+              width: "100%", background: "#1C1C1C", color: "#9A8A7A",
+              border: "0.5px solid #333333", borderRadius: 14, padding: "14px",
+              fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+              marginBottom: 0,
+            }}
+          >
+            처음부터 다시하기
+          </button>
+
+        </div>
+      </div>
+      </div>
+    );
+  };
+
+  const renderTracking = () => {
+    const strategy = getStrategyInfo(forecastRate);
+    const allocation = computeAllocation() || { amount: 0, pension: 0, isa: 0, other: 0, taxBenefit: 0, note: "" };
+    const accountLabels = { pension: "연금저축펀드", isa: "ISA", other: "CMA" };
+
+    // STEP 3 확정 자산 목록 플래팅
+    const allAssets = [];
+    Object.entries(strategy.assets).forEach(([accountKey, assets]) => {
+      if (!assets || assets.length === 0) return;
+      const accountAmount = allocation[accountKey] || 0;
+      if (accountAmount === 0) return;
+      const amounts = calcAssetAmounts(accountAmount, assets);
+      assets.forEach((asset, idx) => {
+        allAssets.push({
+          id: `${accountKey}_${asset.name}`,
+          accountKey,
+          accountLabel: accountLabels[accountKey],
+          name: asset.name,
+          targetAmount: amounts[idx] || 0,
+        });
+      });
+    });
+
+    const totalTargetAmount = allAssets.reduce((s, a) => s + a.targetAmount, 0);
+    const totalCurrentAmount = allAssets.reduce((s, a) => s + (trackingValues[a.id]?.value || 0), 0);
+    const hasAnyInput = allAssets.some((a) => (trackingValues[a.id]?.value || 0) > 0);
+
+    // 종목별 비율 계산
+    const assetStats = allAssets.map((a) => {
+      const currentVal = trackingValues[a.id]?.value || 0;
+      const targetRatio = totalTargetAmount > 0 ? a.targetAmount / totalTargetAmount : 0;
+      const currentRatio = totalCurrentAmount > 0 ? currentVal / totalCurrentAmount : 0;
+      const diff = currentRatio - targetRatio; // 양수=초과, 음수=부족
+      const isBalanced = Math.abs(diff) <= 0.05;
+      return { ...a, currentVal, targetRatio, currentRatio, diff, isBalanced };
+    });
+
+    // 리밸런싱 제안: 부족한 종목에 추가 매수 금액 계산
+    const rebalanceSuggestions = assetStats
+      .filter((a) => a.diff < -0.05 && totalCurrentAmount > 0)
+      .map((a) => {
+        const needed = Math.round((a.targetRatio * totalCurrentAmount - a.currentVal) / 10000) * 10000;
+        return { ...a, needed: Math.max(0, needed) };
+      })
+      .filter((a) => a.needed > 0);
+
+    const allBalanced = hasAnyInput && rebalanceSuggestions.length === 0;
+    const _d = _directionRef.current;
+    const _anim = _d === 0 ? "none" : "pageFadeIn 0.3s ease both";
+
+    return (
+      <div style={{ animation: _anim, overflowX: "hidden" }}>
+      <div style={{
+        minHeight: "100vh", background: "#0A0A0A",
+        display: "flex", alignItems: "flex-start", justifyContent: "center",
+        padding: "40px 16px 60px", fontFamily: "'Pretendard', 'Apple SD Gothic Neo', sans-serif",
+      }}>
+        <div style={{ width: "100%", maxWidth: 560 }}>
+
+          {/* 브랜드 헤더 */}
+          <div style={{ marginBottom: 20, paddingBottom: 14, borderBottom: "0.5px solid #232323" }}>
+            <span style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.5px", color: "#FFFFFF" }}>
+              exit <span style={{ color: "#03fcf0" }}>rich</span>
+            </span>
+          </div>
+
+          {/* 헤더 */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", background: "#03fcf0", borderRadius: 20, padding: "4px 12px" }}>
+                <span style={{ fontSize: 11, color: "#1A1410", fontWeight: 500 }}>STEP 5 of 5</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate("forecast")}
+                style={{ background: "#1C1C1C", border: "0.5px solid #333333", borderRadius: 12, padding: "10px 14px", fontSize: 12, color: "#9A8A7A", cursor: "pointer" }}
+              >
+                뒤로가기
+              </button>
+            </div>
+            <h1 style={{ fontSize: 24, fontWeight: 600, color: "#FFFFFF", margin: "0 0 4px" }}>
+              포트폴리오 트래킹
+            </h1>
+            <p style={{ fontSize: 13, color: "#9A8A7A", margin: 0 }}>
+              현재 평가금액을 입력하면 리밸런싱 방향을 알려드려요
+            </p>
+          </div>
+
+          {/* 1. 목표 포트폴리오 + 현재 입력 */}
+          {allAssets.length === 0 ? (
+            <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 20, border: "0.5px solid #332820", padding: 24, marginBottom: 12, textAlign: "center" }}>
+              <p style={{ color: "#9A8A7A", fontSize: 14 }}>STEP 3에서 포트폴리오를 먼저 설정해주세요.</p>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+                {Object.entries(
+                  allAssets.reduce((acc, a) => {
+                    if (!acc[a.accountKey]) acc[a.accountKey] = [];
+                    acc[a.accountKey].push(a);
+                    return acc;
+                  }, {})
+                ).map(([accountKey, assets]) => (
+                  <div key={accountKey} style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 20, border: "0.5px solid #332820", padding: 18 }}>
+                    <div style={{ fontSize: 12, color: "#8A7A6A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.3px", marginBottom: 14 }}>
+                      {accountLabels[accountKey]}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      {assets.map((asset) => {
+                        const stat = assetStats.find((s) => s.id === asset.id);
+                        const inputVal = trackingValues[asset.id];
+                        const currentVal = inputVal?.value || 0;
+                        const targetPct = Math.round((stat?.targetRatio || 0) * 100);
+                        const currentPct = totalCurrentAmount > 0
+                          ? Math.round((currentVal / totalCurrentAmount) * 100)
+                          : 0;
+                        const isOver = stat && !stat.isBalanced && stat.diff > 0;
+                        const isUnder = stat && !stat.isBalanced && stat.diff < 0;
+                        const barColor = isOver || isUnder ? "#FF4D9D" : "#03fcf0";
+
+                        return (
+                          <div key={asset.id}>
+                            {/* 종목명 + 목표금액 */}
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                              <div>
+                                <div style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }}>{asset.name}</div>
+                                <div style={{ fontSize: 12, color: "#9A8A7A", marginTop: 2 }}>
+                                  목표 <span style={{ color: "#9A8A7A" }}>{formatKRW(asset.targetAmount)}원</span>
+                                  {" "}·{" "}
+                                  <span style={{ color: "#6A5A4A" }}>{targetPct}%</span>
+                                </div>
+                                {TICKER_CODES[asset.name] && (() => {
+                                  const p = etfPrices[asset.name];
+                                  if (!p || p.status === "loading") return <div style={{ fontSize: 11, color: "#6A5A4A", marginTop: 3 }}>시세 로딩 중…</div>;
+                                  if (p.status === "error") return <div style={{ fontSize: 11, color: "#6A5A4A", marginTop: 3 }}>시세 조회 실패</div>;
+                                  const shares = Math.floor(asset.targetAmount / p.price);
+                                  return (
+                                    <div style={{ fontSize: 11, color: "#03fcf0", marginTop: 3 }}>
+                                      현재가 {Math.round(p.price).toLocaleString("ko-KR")}원 · 목표 수량 약 {shares.toLocaleString("ko-KR")}주
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                              {currentVal > 0 && (
+                                <div style={{ textAlign: "right" }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: isOver || isUnder ? "#FF4D9D" : "#03fcf0" }}>
+                                    현재 {currentPct}%
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 목표 vs 현재 비율 막대 */}
+                            {currentVal > 0 && (
+                              <div style={{ marginBottom: 8 }}>
+                                {/* 목표 기준선 막대 */}
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                                  <div style={{ fontSize: 10, color: "#6A5A4A", minWidth: 22 }}>목표</div>
+                                  <div style={{ flex: 1, height: 5, background: "#332820", borderRadius: 3, overflow: "hidden" }}>
+                                    <div style={{ width: `${targetPct}%`, height: "100%", background: "#6A5A4A", borderRadius: 3 }} />
+                                  </div>
+                                  <div style={{ fontSize: 10, color: "#6A5A4A", minWidth: 28, textAlign: "right" }}>{targetPct}%</div>
+                                </div>
+                                {/* 현재 막대 */}
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <div style={{ fontSize: 10, color: isOver || isUnder ? "#FF4D9D" : "#03fcf0", minWidth: 22 }}>현재</div>
+                                  <div style={{ flex: 1, height: 5, background: "#332820", borderRadius: 3, overflow: "hidden" }}>
+                                    <div style={{ width: `${Math.min(100, currentPct)}%`, height: "100%", background: barColor, borderRadius: 3, transition: "width 0.3s ease" }} />
+                                  </div>
+                                  <div style={{ fontSize: 10, color: isOver || isUnder ? "#FF4D9D" : "#03fcf0", minWidth: 28, textAlign: "right" }}>
+                                    {currentPct}%
+                                  </div>
+                                </div>
+                                {(isOver || isUnder) && (
+                                  <div style={{ fontSize: 10, color: "#FF4D9D", marginTop: 4, textAlign: "right" }}>
+                                    {isOver ? `목표 대비 +${Math.round(stat.diff * 100)}%` : `목표 대비 ${Math.round(stat.diff * 100)}%`}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* 현재 평가금액 입력 */}
+                            <div style={{ position: "relative" }}>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={inputVal?.str || ""}
+                                onChange={(e) => {
+                                  const raw = e.target.value.replace(/[^0-9]/g, "");
+                                  const str = raw ? Number(raw).toLocaleString("ko-KR") : "";
+                                  updateTracking(asset.id, str, Number(raw) || 0);
+                                }}
+                                placeholder={`${formatKRW(asset.targetAmount)}원 (목표)`}
+                                style={{
+                                  width: "100%", border: "0.5px solid #332820", borderRadius: 12,
+                                  padding: "10px 40px 10px 14px", fontSize: 14,
+                                  color: "#ffffff", background: "#2A2018",
+                                  outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+                                }}
+                                onFocus={(e) => (e.target.style.borderColor = "#03fcf0")}
+                                onBlur={(e) => (e.target.style.borderColor = "#332820")}
+                              />
+                              <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "#6A5A4A" }}>원</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 2. 총 평가액 요약 */}
+              {hasAnyInput && (
+                <div style={{ background: "#0E1F1C", boxShadow: "0 2px 12px rgba(0,0,0,0.10)", borderRadius: 20, border: "0.5px solid #0D3030", padding: 20, marginBottom: 16, animation: "fadeIn 0.3s ease" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <span style={{ fontSize: 13, color: "#03fcf0" }}>현재 총 평가액</span>
+                    <span style={{ fontSize: 22, fontWeight: 500, color: "#ffffff", letterSpacing: "-1px" }}>
+                      {formatKRW(totalCurrentAmount)}원
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#6A5A4A" }}>
+                    <span>목표 투자금 대비</span>
+                    <span style={{ color: totalCurrentAmount >= totalTargetAmount ? "#FF4D9D" : "#9A8A7A" }}>
+                      {totalCurrentAmount >= totalTargetAmount
+                        ? `+${formatKRW(totalCurrentAmount - totalTargetAmount)}원`
+                        : `-${formatKRW(totalTargetAmount - totalCurrentAmount)}원`}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* 3. 리밸런싱 제안 */}
+              {hasAnyInput && (
+                <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 20, border: "0.5px solid #332820", padding: 20, marginBottom: 16, animation: "fadeIn 0.3s ease" }}>
+                  <div style={{ fontSize: 12, color: "#8A7A6A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.3px", marginBottom: 14 }}>
+                    리밸런싱 제안
+                  </div>
+
+                  {allBalanced ? (
+                    <div style={{ background: "#0E1F1C", borderRadius: 14, border: "0.5px solid #0D3030", padding: "14px 16px" }}>
+                      <div style={{ fontSize: 14, color: "#03fcf0", fontWeight: 500, marginBottom: 4 }}>
+                        ✅ 포트폴리오가 목표 비율과 거의 일치해요
+                      </div>
+                      <div style={{ fontSize: 12, color: "#6A5A4A" }}>
+                        잘 유지되고 있어요! 계속 이 방향으로 투자하세요.
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {rebalanceSuggestions.map((s) => (
+                        <div key={s.id} style={{ background: "#1A0810", borderRadius: 14, border: "0.5px solid #FF4D9D33", padding: "14px 16px" }}>
+                          <div style={{ fontSize: 14, color: "#ffffff", fontWeight: 500, marginBottom: 6 }}>
+                            📊 {s.name}이(가) 목표보다{" "}
+                            <span style={{ color: "#FF4D9D" }}>{Math.abs(Math.round(s.diff * 100))}%</span> 부족해요
+                          </div>
+                          <div style={{ fontSize: 13, color: "#9A8A7A", lineHeight: 1.6 }}>
+                            다음 매수 때{" "}
+                            <span style={{ color: "#FF4D9D", fontWeight: 600 }}>{s.name}</span>에{" "}
+                            <span style={{ color: "#ffffff", fontWeight: 600 }}>{formatKRW(s.needed)}원</span> 더 넣으면
+                            균형이 맞춰져요.
+                          </div>
+                        </div>
+                      ))}
+                      {!hasAnyInput && (
+                        <div style={{ fontSize: 13, color: "#6A5A4A", textAlign: "center", padding: "8px 0" }}>
+                          위에서 현재 평가금액을 입력하면 제안이 표시돼요
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 리밸런싱 안내 */}
+                  <div style={{ marginTop: 14, padding: "12px 14px", background: "#241C16", borderRadius: 12, border: "0.5px solid #332820", fontSize: 12, color: "#6A5A4A", lineHeight: 1.7 }}>
+                    💡 이미 투자한 자산을 파는 것보다, 다음 투자금을 부족한 곳에 넣어
+                    비율을 맞추는 게 세금·수수료 측면에서 유리해요.
+                  </div>
+                </div>
+              )}
+
+              {!hasAnyInput && (
+                <div style={{ background: "#241C16", borderRadius: 14, border: "0.5px solid #332820", padding: "14px 16px", marginBottom: 16, fontSize: 13, color: "#6A5A4A", lineHeight: 1.7 }}>
+                  💡 위 종목별 현재 평가금액을 입력하면 리밸런싱 제안이 자동 계산돼요.
+                  입력한 값은 자동 저장돼요.
+                </div>
+              )}
+            </>
+          )}
+
+          {/* 면책 */}
+          <div style={{ fontSize: 11, color: "#999999", lineHeight: 1.7, marginBottom: 16, padding: "0 4px" }}>
+            ⚠️ 제안은 입력한 현재 평가금액 기준이며, 실제 투자 결정은 본인 판단으로 해주세요.
+          </div>
+
+          {/* 처음부터 다시하기 */}
+          <button
+            type="button"
+            onClick={handleResetAll}
+            style={{
+              width: "100%", background: "#1C1C1C", color: "#9A8A7A",
+              border: "0.5px solid #333333", borderRadius: 14, padding: "14px",
+              fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+            }}
+          >
+            처음부터 다시하기
+          </button>
+
+        </div>
+      </div>
+      </div>
+    );
+  };
+
+  const renderCalculator = () => {
+    const _d = _directionRef.current;
+    const _anim = _d === 0 ? "none" : "pageFadeIn 0.3s ease both";
+    return (
+    <div style={{ animation: _anim, overflowX: "hidden" }}>
+    <div style={{
+      minHeight: "100vh", background: "#0A0A0A",
+      display: "flex", alignItems: "flex-start", justifyContent: "center",
+      padding: "40px 16px 60px",
+      fontFamily: "'Pretendard', 'Apple SD Gothic Neo', sans-serif",
+    }}>
+      <div style={{ width: "100%", maxWidth: 480 }}>
+
+        {/* 브랜드 헤더 */}
+        <div style={{ marginBottom: 24, paddingBottom: 14, borderBottom: "0.5px solid #232323" }}>
+          <span style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.5px", color: "#FFFFFF" }}>
+            exit <span style={{ color: "#03fcf0" }}>rich</span>
+          </span>
+        </div>
+
+        {/* 헤더 */}
+        <div style={{ marginBottom: 28 }}>
+          <div style={{
+            display: "inline-flex", alignItems: "center",
+            background: "#03fcf0", borderRadius: 20, padding: "4px 12px", marginBottom: 12,
+          }}>
+            <span style={{ fontSize: 11, color: "#1A1410", fontWeight: 500 }}>STEP 1 of 5</span>
+          </div>
+          <h1 style={{ fontSize: 24, fontWeight: 600, color: "#FFFFFF", letterSpacing: "-0.5px", lineHeight: 1.3, margin: 0 }}>
+            퇴직금 계산하기
+          </h1>
+          <p style={{ fontSize: 14, color: "#9A8A7A", marginTop: 6 }}>입력하면 바로 계산해드릴게요 💚</p>
+        </div>
+
+        {/* 근무 기간 */}
+        <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16, border: "0.5px solid #332820", padding: "20px", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#ffffff", marginBottom: 14, textTransform: "uppercase", letterSpacing: "0.3px" }}>근무 기간</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <InputField label="입사일" type="date" value={startDate} onChange={setStartDate} max={todayStr} />
+            <InputField label="퇴직일" type="date" value={endDate} onChange={setEndDate} max={todayStr} />
+          </div>
+        </div>
+
+        {/* 3개월 급여 */}
+        <div style={{ background: "#241C16", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", borderRadius: 16, border: "0.5px solid #332820", padding: "20px", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#ffffff", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.3px" }}>최근 3개월 급여</div>
+          <div style={{ fontSize: 12, color: "#9A8A7A", marginBottom: 14 }}>퇴직일 기준 직전 3개월이에요</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {months.map((m, i) => (
+              <MonthPayCard
+                key={i}
+                label={monthLabels[i]}
+                data={m}
+                showMinWageWarning={minWageWarnings[i]}
+                onChange={(updated) =>
+                  setMonths(months.map((prev, idx) => (idx === i ? updated : prev)))
+                }
+              />
+            ))}
+          </div>
+          {months.every((m) => m.base > 0) && (
+            <div style={{
+              marginTop: 14, padding: "12px 14px",
+              background: "#1A0810", borderRadius: 10,
+              border: "0.5px solid #FF4D9D44",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontSize: 12, color: "#FFFFFF", fontWeight: 500 }}>3개월 평균 월급</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: "#FFFFFF" }}>
+                  {formatKRW(Math.floor(months.reduce((s, m) => s + m.base + m.allowance, 0) / 3))}원
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: "#9A8A7A", lineHeight: 1.8, borderTop: "0.5px solid #FF4D9D33", paddingTop: 8 }}>
+                <div>✅ 고정수당 = 매달 고정적으로 받는 금액 (식대, 교통비 등)</div>
+                <div>❌ 성과급·인센티브는 통상 퇴직금 산정에서 제외돼요</div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 연차수당 토글 */}
+        <LeaveToggle
+          includeLeave={includeLeave}
+          onToggle={() => { setIncludeLeave(!includeLeave); setLeaveBonusStr(""); }}
+          bonusStr={leaveBonusStr}
+          onBonusChange={(v) => setLeaveBonusStr(toComma(v))}
+        />
+
+        {/* 에러 */}
+        {error && (
+          <div style={{ background: "#1A0810", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#FF4D9D", marginBottom: 12 }}>
+            ⚠️ {error}
+          </div>
+        )}
+
+        {/* 계산 버튼 */}
+        <button
+          onClick={handleCalc}
+          style={{
+            width: "100%", background: "#03fcf0", color: "#0A0A0A",
+            border: "none", borderRadius: 12, padding: "14px",
+            fontSize: 15, fontWeight: 600, cursor: "pointer",
+            fontFamily: "inherit", transition: "background 0.15s",
+          }}
+          onMouseEnter={(e) => (e.target.style.background = "#03fcf0")}
+          onMouseLeave={(e) => (e.target.style.background = "#03fcf0")}
+        >
+          퇴직금 계산하기
+        </button>
+
+        {/* 결과 카드 */}
+        {result && (
+          <div style={{ marginTop: 20, background: "#0E1F1C", boxShadow: "0 2px 12px rgba(0,0,0,0.10)", borderRadius: 16, border: "0.5px solid #0D3030", padding: "24px" }}>
+            <p style={{ fontSize: 12, color: "#03fcf0", fontWeight: 500, marginBottom: 4 }}>예상 퇴직금</p>
+            <p style={{ fontSize: 32, fontWeight: 700, color: "#ffffff", letterSpacing: "-1px", margin: "0 0 4px" }}>
+              {formatKRW(result.pay)}원
+            </p>
+            <p style={{ fontSize: 13, color: "#03fcf0" }}>
+              근속 {formatWorkPeriod(result.workDays)} 기준
+              {includeLeave && " · 연차수당 포함"}
+            </p>
+            <div style={{ marginTop: 14, padding: "12px 14px", background: "#0E2A26", borderRadius: 10, fontSize: 12, color: "#6A5A4A", lineHeight: 1.8 }}>
+              일평균임금 {formatKRW(result.dailyAvg)}원<br />
+              3개월 총급여 ÷ {result.actual3MonthDays}일 × 30일 × ({result.workDays}일 ÷ 365)
+              {includeLeave && <><br />연차수당 1년치({formatKRW(fromComma(leaveBonusStr))}원)의 3/12 반영</>}
+            </div>
+
+            {/* 직접 입력 토글 */}
+            <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "#03fcf0" }}>실수령액이 다른가요? 직접 입력</span>
+              <div
+                onClick={() => { const next = !directInputMode; setDirectInputMode(next); if (!next) setDirectInputStr("6,750,000"); }}
+                style={{
+                  width: 40, height: 22, borderRadius: 99,
+                  background: directInputMode ? "#03fcf0" : "#332820",
+                  position: "relative", cursor: "pointer", transition: "background 0.2s",
+                }}
+              >
+                <div style={{
+                  position: "absolute", top: 2,
+                  left: directInputMode ? 20 : 2,
+                  width: 18, height: 18, borderRadius: "50%",
+                  background: "#ffffff", transition: "left 0.2s",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.5)",
+                }} />
+              </div>
+            </div>
+            {directInputMode && (
+              <div style={{ marginTop: 10, animation: "fadeIn 0.2s ease" }}>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={directInputStr}
+                    onChange={(e) => setDirectInputStr(toComma(e.target.value))}
+                    placeholder="퇴직금 직접 입력"
+                    style={{
+                      width: "100%", border: "0.5px solid #332820", borderRadius: 10,
+                      padding: "10px 36px 10px 14px", fontSize: 15, fontWeight: 600,
+                      color: "#ffffff", background: "#2A2018",
+                      outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+                    }}
+                    onFocus={(e) => (e.target.style.borderColor = "#03fcf0")}
+                    onBlur={(e) => (e.target.style.borderColor = "#332820")}
+                  />
+                  <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "#03fcf0" }}>원</span>
+                </div>
+                {directInputStr && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#03fcf0" }}>
+                    만원 단위 절삭 → {formatKRW(Math.floor(fromComma(directInputStr) / 10000) * 10000)}원 사용
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: "0.5px solid #0D3030" }}>
+              {/* 경로 미선택: 2개 버튼 */}
+              {!showEmergencyFlow && !showImmediateSummary && (
+                <>
+                  <p style={{ fontSize: 13, color: "#03fcf0", marginBottom: 12 }}>실제 투자 금액을 정밀하게 계산할까요?</p>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => { setShowEmergencyFlow(true); setQ1Answer(null); setQ2Answer(null); setQ3Answer(null); setCalculatedEmergency(null); }}
+                      style={{
+                        background: "#241C16", color: "#03fcf0", border: "0.5px solid #0D3030", borderRadius: 10, padding: "12px",
+                        fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                      }}
+                      onMouseEnter={(e) => { e.target.style.background = "#2A2018"; }}
+                      onMouseLeave={(e) => { e.target.style.background = "#241C16"; }}
+                    >
+                      ✅ 비상금·생활비 계산하기
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleImmediateSim}
+                      style={{
+                        background: "#241C16", color: "#03fcf0", border: "0.5px solid #0D3030", borderRadius: 10, padding: "12px",
+                        fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                      }}
+                      onMouseEnter={(e) => { e.target.style.background = "#2A2018"; }}
+                      onMouseLeave={(e) => { e.target.style.background = "#241C16"; }}
+                    >
+                      ⚡ 퇴직금 전액으로 바로 시뮬레이션
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* 경로 A: 비상금 계산 */}
+              {showEmergencyFlow && (
+                <>
+                  {/* Q1 */}
+                  <div style={{ animation: "fadeIn 0.3s ease", marginBottom: 12 }}>
+                    <p style={{ fontSize: 13, color: "#03fcf0", fontWeight: 500, marginBottom: 10 }}>Q1. 퇴직 후 수익원이 있나요?</p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {[
+                        { label: "💼 이직 확정 (취업 예정)", idx: 0 },
+                        { label: "🔍 구직 중 (아직 미확정)", idx: 1 },
+                        { label: "💻 프리랜서·부업 수익 있음", idx: 2 },
+                        { label: "🙅 당분간 수익 없음", idx: 3 },
+                      ].map((opt) => (
+                        <button
+                          key={opt.idx}
+                          type="button"
+                          onClick={() => { setQ1Answer(opt.idx); setQ2Answer(null); setQ3Answer(null); }}
+                          style={{
+                            padding: 12, borderRadius: 10,
+                            border: q1Answer === opt.idx ? "0.5px solid #03fcf0" : "0.5px solid #332820",
+                            background: q1Answer === opt.idx ? "#03fcf0" : "#2A2018",
+                            color: q1Answer === opt.idx ? "#0A0A0A" : "#9A8A7A",
+                            fontSize: 13, fontWeight: q1Answer === opt.idx ? 500 : 400, textAlign: "left", cursor: "pointer",
+                            fontFamily: "inherit", transition: "all 0.15s",
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Q2: Q1이 "구직 중" 또는 "수익 없음"일 때만 표시 */}
+                  {q1Answer !== null && (q1Answer === 1 || q1Answer === 3) && (
+                    <div style={{ animation: "fadeIn 0.3s ease", marginBottom: 12, marginTop: 16 }}>
+                      <p style={{ fontSize: 13, color: "#03fcf0", fontWeight: 500, marginBottom: 10 }}>Q2. 예상 공백 기간이 얼마나 되나요?</p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {[
+                          { label: "1~3개월", idx: 0 },
+                          { label: "3~6개월", idx: 1 },
+                          { label: "6개월~1년", idx: 2 },
+                          { label: "1년 이상", idx: 3 },
+                        ].map((opt) => (
+                          <button
+                            key={opt.idx}
+                            type="button"
+                            onClick={() => setQ2Answer(opt.idx)}
+                            style={{
+                              padding: 12, borderRadius: 10,
+                              border: q2Answer === opt.idx ? "0.5px solid #03fcf0" : "0.5px solid #332820",
+                              background: q2Answer === opt.idx ? "#03fcf0" : "#2A2018",
+                              color: q2Answer === opt.idx ? "#0A0A0A" : "#9A8A7A",
+                              fontSize: 13, fontWeight: q2Answer === opt.idx ? 500 : 400, textAlign: "left", cursor: "pointer",
+                              fontFamily: "inherit", transition: "all 0.15s",
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Q3: Q1이 선택되고, (Q1이 이직확정/프리라면 바로) 또는 (Q2가 선택되었다면) 표시 */}
+                  {q1Answer !== null && (q1Answer === 0 || q1Answer === 2 || q2Answer !== null) && (
+                    <div style={{ animation: "fadeIn 0.3s ease", marginBottom: 12, marginTop: 16 }}>
+                      <p style={{ fontSize: 13, color: "#03fcf0", fontWeight: 500, marginBottom: 10 }}>Q3. 월 생활비가 얼마나 되나요?</p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {[
+                          { label: "100만원 미만", idx: 0 },
+                          { label: "100~200만원", idx: 1 },
+                          { label: "200~300만원", idx: 2 },
+                          { label: "300만원 이상", idx: 3 },
+                        ].map((opt) => (
+                          <button
+                            key={opt.idx}
+                            type="button"
+                            onClick={() => setQ3Answer(opt.idx)}
+                            style={{
+                              padding: 12, borderRadius: 10,
+                              border: q3Answer === opt.idx ? "0.5px solid #03fcf0" : "0.5px solid #332820",
+                              background: q3Answer === opt.idx ? "#03fcf0" : "#2A2018",
+                              color: q3Answer === opt.idx ? "#0A0A0A" : "#9A8A7A",
+                              fontSize: 13, fontWeight: q3Answer === opt.idx ? 500 : 400, textAlign: "left", cursor: "pointer",
+                              fontFamily: "inherit", transition: "all 0.15s",
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 결과 표시: Q1, Q2(필요시), Q3 모두 선택되었을 때 */}
+                  {q1Answer !== null && (q1Answer === 0 || q1Answer === 2 || q2Answer !== null) && q3Answer !== null && (() => {
+                    // 인라인 비상금 계산 (버튼 클릭 전 미리 표시)
+                    const basePay = directInputMode && directInputStr ? fromComma(directInputStr) : result.pay;
+                    const monthlyMap = [1000000, 1500000, 2500000, 3000000];
+                    const monthsMid = [2, 4, 9, 12];
+                    const monthly = monthlyMap[q3Answer];
+                    let emergencyMonths = 0;
+                    if (q1Answer === 0) emergencyMonths = 2;
+                    else if (q1Answer === 1 && q2Answer !== null) emergencyMonths = monthsMid[q2Answer];
+                    else if (q1Answer === 2) emergencyMonths = 3;
+                    else if (q1Answer === 3 && q2Answer !== null) emergencyMonths = monthsMid[q2Answer];
+                    const emergencyRounded = Math.floor((monthly * emergencyMonths) / 10000) * 10000;
+                    const retirementFloor = Math.floor(basePay / 10000) * 10000;
+                    const investable = Math.max(0, retirementFloor - emergencyRounded);
+                    return (
+                      <div style={{ animation: "fadeIn 0.3s ease", marginTop: 16, paddingTop: 16, borderTop: "0.5px solid #0D3030" }}>
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, color: "#9A8A7A", marginBottom: 6 }}>
+                            <span>퇴직금 (만원 절삭)</span>
+                            <span style={{ fontWeight: 600, color: "#ffffff" }}>{formatKRW(retirementFloor)}원</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, color: "#9A8A7A", marginBottom: 12 }}>
+                            <span>권장 비상금</span>
+                            <span style={{ fontWeight: 600, color: "#ffffff" }}>- {formatKRW(emergencyRounded)}원</span>
+                          </div>
+                          <div style={{ paddingTop: 12, borderTop: "0.5px solid #0D3030", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontSize: 13, fontWeight: 500, color: "#FF4D9D" }}>실제 투자 금액</span>
+                            <span style={{ fontSize: 18, fontWeight: 700, color: "#FF4D9D" }}>{formatKRW(investable)}원</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { computeEmergency(); setTimeout(() => { setAccountISA(null); setAccountPension(null); setAllocationResult(null); navigate("account"); resetQuiz(); }, 300); }}
+                          style={{
+                            width: "100%", background: "#FF4D9D", color: "#1A1410",
+                            border: "none", borderRadius: 10, padding: "12px",
+                            fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                          }}
+                        >
+                          투자 성향 진단하기 →
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+
+              {/* 경로 B: 즉시 시뮬레이션 */}
+              {showImmediateSummary && (
+                <div style={{ animation: "fadeIn 0.3s ease", marginTop: 12 }}>
+                  <div style={{ padding: "12px 0", textAlign: "center" }}>
+                    <div style={{ fontSize: 13, color: "#03fcf0", marginBottom: 4 }}>투자 예정 금액</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#ffffff" }}>{formatKRW(investmentBase)}원</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setAccountISA(null); setAccountPension(null); setAllocationResult(null); navigate("account"); resetQuiz(); }}
+                    style={{
+                      width: "100%", background: "#03fcf0", color: "#0A0A0A",
+                      border: "none", borderRadius: 10, padding: "12px",
+                      fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                    }}
+                    onMouseEnter={(e) => (e.target.style.background = "#03fcf0")}
+                    onMouseLeave={(e) => (e.target.style.background = "#03fcf0")}
+                  >
+                    투자 성향 진단하기 →
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </div>
+
+    </div>
+    </div>
+    );
+  };
+
+  return (
+    <>
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes barRise {
+          from { transform: scaleY(0); opacity: 0; }
+          to   { transform: scaleY(1); opacity: 1; }
+        }
+        @keyframes pageFadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+      `}</style>
+      {screen === "quiz" && renderQuiz()}
+      {screen === "account" && renderAccount()}
+      {screen === "map" && renderMap()}
+      {screen === "forecast" && renderForecast()}
+      {screen === "tracking" && renderTracking()}
+      {screen === "calculator" && renderCalculator()}
+    </>
+  );
+}
